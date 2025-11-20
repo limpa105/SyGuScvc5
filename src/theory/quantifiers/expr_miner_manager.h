@@ -53,7 +53,7 @@ class ExpressionMinerManager : protected EnvObj
    * distinct (up to T-equivalence) with all previous terms added to this class,
    * which is computed based on the miners that this manager enables.
    */
-  bool addTerm(Node sol);
+  bool addTerm(Node sol, Node conditions);
 
  private:
   /** filter strong solutions (--sygus-filter-sol=strong) */

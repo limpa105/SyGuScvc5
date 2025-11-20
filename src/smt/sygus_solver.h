@@ -261,6 +261,12 @@ class SygusSolver : protected EnvObj
    * quantifiers::SygusUtils::mkSygusConjecture.
    */
   std::unique_ptr<SolverEngine> d_subsolver;
+
+  std::vector<Node> d_prevSolutions;
+
+  std::vector<Node> d_callArgs;
+
+  Node d_bodyAssump;
 };
 
 }  // namespace smt

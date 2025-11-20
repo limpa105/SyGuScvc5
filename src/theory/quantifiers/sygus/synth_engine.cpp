@@ -130,6 +130,7 @@ void SynthEngine::assignConjecture(Node q)
     d_conjs.push_back(std::unique_ptr<SynthConjecture>(new SynthConjecture(
         d_env, d_qstate, d_qim, d_qreg, d_treg, d_statistics)));
   }
+  // LOOK HERE WE CREATE A CONJECTURE
   d_conjs.back()->assign(q);
 }
 

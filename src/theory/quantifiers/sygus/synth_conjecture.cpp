@@ -163,7 +163,6 @@ void SynthConjecture::assign(Node q)
   // post-simplify the quantified formula based on the process utility
   d_simp_quant = d_ceg_proc->postSimplify(d_simp_quant);
 
-  // finished simplifying the quantified formula at this point
 
   // convert to deep embedding and finalize single invocation here
   d_embed_quant = d_embConv->process(d_simp_quant, templates, templates_arg);
@@ -899,14 +898,16 @@ bool SynthConjecture::runExprMiner()
       continue;
     }
     Node e = d_embed_quant[0][i];
+    Node h = d_base_inst;
     int8_t status = statuses[i];
     // run expression mining
     if (status != 0)
     {
+      
       ExpressionMinerManager* emm = getExprMinerManagerFor(e);
       if (emm != nullptr)
       {
-        bool ret = emm->addTerm(sol);
+       bool ret = emm->addTerm(sol, d_embed_quant);;
         if (!ret)
         {
           // count the number of filtered solutions

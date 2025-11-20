@@ -70,17 +70,19 @@ void ExpressionMinerManager::enableFilterStrongSolutions()
   d_sols.setLogicallyStrong(false);
 }
 
-bool ExpressionMinerManager::addTerm(Node sol)
+bool ExpressionMinerManager::addTerm(Node sol, Node conditions)
 {
   // set the builtin version
   Node solb = datatypes::utils::sygusToBuiltin(sol, true);
+  // Node try1 = datatypes::utils::rewriteNode(solb);
+  // std::cout << try1 << "\n";
 
   bool ret = true;
   // filter based on logical strength
   if (d_doFilterLogicalStrength)
   {
     std::vector<Node> filtered;
-    ret = d_sols.addTerm(solb, filtered);
+    ret = d_sols.addTerm(solb, filtered, conditions);
   }
   return ret;
 }

@@ -216,11 +216,20 @@ SynthResult SygusSolver::checkSynth(bool isNext)
 {
   Trace("smt") << "SygusSolver::checkSynth" << std::endl;
   // if applicable, check if the subsolver is the correct one
-  if (!isNext)
+  if (!isNext || d_prevSolutions.size() > 0 )
   {
     // if we are not using check-synth-next, we always reconstruct the solver.
     d_sygusConjectureStale = true;
   }
+//   if (isNext)
+// {
+//     //std::cout  << "[SyGuS] check-synth-next called" << std::endl;
+//     //std::cout  << "[SyGuS] Previous solutions:" << std::endl;
+//     // for (size_t i = 0; i < d_prevSolutions.size(); i++)
+//     // {
+//     //     std::cout  << i << ": " << d_prevSolutions[i] << std::endl;
+//     // }
+// }
   if (usingSygusSubsolver() && d_subsolverCd.get() != d_subsolver.get())
   {
     // this can occur if we backtrack to a place where we were using a different
@@ -238,8 +247,158 @@ SynthResult SygusSolver::checkSynth(bool isNext)
     // note that if there are no constraints, then assumptions are irrelevant
     if (!d_sygusConstraints.empty() && !d_sygusAssumps.empty())
     {
+      
       Node bodyAssump = nm->mkAnd(listToVector(d_sygusAssumps));
+      d_bodyAssump = bodyAssump;
       body = nm->mkNode(Kind::IMPLIES, bodyAssump, body);
+     if (d_prevSolutions.size()!=0)
+      {
+        Node f = d_sygusFunSymbols[0];
+
+
+Node globalF = d_sygusFunSymbols[0];
+
+
+// Use the bound copy of f if mkSygusConjecture wrapped it in a forall
+Node fSym = globalF;
+Node searchRoot = rewrite(d_conj);
+if (searchRoot.getKind() == Kind::FORALL)
+{
+
+  for (const Node& v : searchRoot[0])
+  {
+
+    if (v.getType() == globalF.getType()) { fSym = v; }
+  }
+}
+
+
+// DFS search that correctly handles APPLY_UF (via getOperator) and HO_APPLY (curried)
+std::vector<Node> callArgs;
+{
+  std::vector<Node> st{searchRoot};
+  while (!st.empty() && callArgs.empty())
+  {
+    Node cur = st.back(); st.pop_back();
+
+    if (cur.getKind() == Kind::APPLY_UF)
+    {
+      Node op = cur.getOperator();  // <-- THIS is the function symbol
+      if (op == fSym)
+      {
+        for (size_t i = 0; i < cur.getNumChildren(); ++i)
+        {
+          callArgs.push_back(cur[i]);
+        }
+        break; // stop as soon as we find it
+      }
+    }
+    else if (cur.getKind() == Kind::HO_APPLY)
+    {
+      // Flatten HO_APPLY: (@ (@ f a) b) -> head=f, args=[a,b]
+      std::vector<Node> collected;
+      Node head = cur;
+      while (head.getKind() == Kind::HO_APPLY)
+      {
+        // children: [0]=function, [1]=arg
+        collected.insert(collected.begin(), head[1]);
+        head = head[0];
+      }
+
+
+      // head can be the bound f directly, or an APPLY_UF whose operator is f
+      if (head == fSym)
+      {
+        callArgs = std::move(collected);
+        for (size_t i = 0; i < callArgs.size(); ++i)
+        break;
+      }
+      else if (head.getKind() == Kind::APPLY_UF && head.getOperator() == fSym)
+      {
+        // args = head’s children (the direct args) followed by collected (curried) args at the end
+        for (size_t i = 0; i < head.getNumChildren(); ++i)
+          callArgs.push_back(head[i]);
+        callArgs.insert(callArgs.end(), collected.begin(), collected.end());
+        for (size_t i = 0; i < callArgs.size(); ++i)
+        break;
+      }
+    }
+
+    // keep searching
+    for (const Node& c : cur) st.push_back(c);
+  }
+}
+
+
+
+  if (callArgs.empty())
+  {
+    std::cout << "[SyGuS] WARNING: did not find pred_f application; skipping.\n";
+  }
+  else
+  {
+    d_callArgs = callArgs;
+    // ---------------------------------------------
+    // 2) Build pred_f(callArgs...)
+    // ---------------------------------------------
+    std::vector<Node> pfChildren;
+    pfChildren.push_back(f);
+    pfChildren.insert(pfChildren.end(), callArgs.begin(), callArgs.end());
+    Node predCall = nm->mkNode(Kind::APPLY_UF, pfChildren);
+    predCall = rewrite(predCall); // normalize shape
+
+    // ---------------------------------------------
+    // 3) Apply LAST solution to SAME args and β-reduce
+    //    This removes the lambda: rewrite does beta-reduction.
+    // ---------------------------------------------
+    Node lastSol = d_prevSolutions[d_prevSolutions.size()-1]; // (lambda (...) body)
+
+    std::vector<Node> solChildren;
+    solChildren.push_back(lastSol);
+    solChildren.insert(solChildren.end(), callArgs.begin(), callArgs.end());
+    Node prevCall = nm->mkNode(Kind::APPLY_UF, solChildren);
+    prevCall = rewrite(prevCall); // β-reduce (lambda ...) application
+
+    // ---------------------------------------------
+    // 4) Build implication: prevCall ⇒ predCall, guard by assumptions
+    // ---------------------------------------------
+    if (options().quantifiers.sygusFilterSolMode
+      == options::SygusFilterSolMode::STRONG)
+   {
+  
+    Node imp = nm->mkNode(Kind::IMPLIES, prevCall, predCall);
+    Node guardedImp = nm->mkNode(Kind::IMPLIES, bodyAssump, imp);
+    body = nm->mkNode(Kind::AND, body, guardedImp);
+
+    Trace("smt-debug") << "[SyGuS] Using args:";
+    for (auto& a : callArgs) Trace("smt") << " " << a;
+    Trace("smt-debug") << "\n[SyGuS] prevCall(after beta): " << prevCall
+                 << "\n[SyGuS] predCall: " << predCall
+                 << "\n[SyGuS] Inserted: " << guardedImp << "\n";
+  
+  }
+  else if (options().quantifiers.sygusFilterSolMode
+           == options::SygusFilterSolMode::WEAK)
+  {
+    Node imp = nm->mkNode(Kind::IMPLIES, predCall, prevCall);
+    Node guardedImp = nm->mkNode(Kind::IMPLIES, bodyAssump, imp);
+    body = nm->mkNode(Kind::AND, body, guardedImp);
+
+    Trace("smt-debug") << "[SyGuS] Using args:";
+    for (auto& a : callArgs) Trace("smt") << " " << a;
+    Trace("smt-debug") << "\n[SyGuS] prevCall(after beta): " << prevCall
+                 << "\n[SyGuS] predCall: " << predCall
+                 << "\n[SyGuS] Inserted: " << guardedImp << "\n";
+  } else {
+     body = nm->mkNode(Kind::IMPLIES, bodyAssump, body);
+  }
+  
+  
+  
+  }
+
+
+      }
     }
     body = body.notNode();
     Trace("smt-debug") << "...constructed sygus constraint " << body
@@ -390,30 +549,239 @@ SynthResult SygusSolver::checkSynth(bool isNext)
   //
   // Thus, we use getSynthSolutions as means of knowing the conjecture was
   // solved.
-  SynthResult sr;
-  std::map<Node, Node> sol_map;
-  if (getSynthSolutions(sol_map))
-  {
-    // if we have solutions, we return "solution"
-    sr = SynthResult(SynthResult::SOLUTION);
-    // Check that synthesis solutions satisfy the conjecture
-    if (options().smt.checkSynthSol)
+  // now we need to do the there exists check. 
+
+SynthResult sr;
+std::map<Node, Node> sol_map;
+
+bool foundNovel = false;
+
+// -----------------------------
+// Loop until we find a NEW solution
+// -----------------------------
+while (true)
+{
+    sol_map.clear();
+
+    // Try to get a solution
+    if (!getSynthSolutions(sol_map))
     {
-      Assertions& as = d_smtSolver.getAssertions();
-      checkSynthSolution(as, sol_map);
+        // No candidate solution found by getSynthSolutions
+        if (r.getStatus() == Result::UNSAT)
+        {
+            sr = SynthResult(SynthResult::NO_SOLUTION);
+        }
+        else
+        {
+            sr = SynthResult(SynthResult::UNKNOWN, UnknownExplanation::UNKNOWN_REASON);
+        }
+        return sr;
     }
-  }
-  else if (r.getStatus() == Result::UNSAT)
-  {
-    // unsat means no solution
-    sr = SynthResult(SynthResult::NO_SOLUTION);
-  }
-  else
-  {
-    // otherwise, we return "unknown"
-    sr = SynthResult(SynthResult::UNKNOWN, UnknownExplanation::UNKNOWN_REASON);
-  }
-  return sr;
+
+    // Extract the *new* candidate solution
+    Node newSol = sol_map.begin()->second;
+
+    // First solution EVER -> automatically novel
+    if (d_prevSolutions.empty())
+    {
+        d_prevSolutions.push_back(newSol);
+        foundNovel = true;
+        break;
+    }
+
+    // If we can't find call args, treat as novel (no way to compare)
+    if (d_callArgs.empty())
+    {
+        d_prevSolutions.push_back(newSol);
+        foundNovel = true;
+        std::cout << "something went wrong\n";
+        break;
+    }
+
+    NodeManager* nm = nodeManager();
+
+    // -------------------------------------------
+    // Apply NEW solution to args: newSol(args...)
+    // -------------------------------------------
+    std::vector<Node> newChildren;
+    newChildren.push_back(newSol);
+    newChildren.insert(newChildren.end(), d_callArgs.begin(), d_callArgs.end());
+    Node newApplied = nm->mkNode(Kind::APPLY_UF, newChildren);
+    newApplied = rewrite(newApplied);
+
+    // -------------------------------------------
+    // Apply OLD (previous) solution: prevSol(args...)
+    // -------------------------------------------
+    std::vector<Node> oldSols; 
+    Node prevSol;
+    for (int i = 0; i< d_prevSolutions.size(); i++ ) {
+        prevSol = d_prevSolutions[i]; 
+        std::vector<Node> oldChildren;
+        oldChildren.push_back(prevSol);
+        oldChildren.insert(oldChildren.end(), d_callArgs.begin(), d_callArgs.end());
+        Node oldApplied = nm->mkNode(Kind::APPLY_UF, oldChildren);
+        oldApplied = rewrite(oldApplied);
+        oldSols.push_back(oldApplied);
+    }
+    
+
+    // -------------------------------------------
+    // Build novelty check:
+    //   bodyAssump ∧ newApplied ∧ ¬oldApplied
+    // -------------------------------------------
+    Node universe = nm->mkNode(Kind::BOUND_VAR_LIST, d_sygusVars[0]);
+
+    // boundVars = all variables except the first
+    std::vector<Node> rest(d_sygusVars.begin() + 1, d_sygusVars.end());
+    Node boundVars = nm->mkNode(Kind::BOUND_VAR_LIST, rest);
+    //std::cout << "SYGUS VARS" << boundVars << "\n";
+    Node novelty = nm->mkConst(true);
+    if (options().quantifiers.sygusFilterSolMode
+      == options::SygusFilterSolMode::STRONG)
+   {
+    for (int i =0; i<oldSols.size()-1; i++){
+       Node temp = nm->mkNode(Kind::AND,
+       d_bodyAssump,
+       oldSols[i+1],
+       nm->mkNode(Kind::NOT, oldSols[i]));
+       temp = nm->mkNode(Kind::EXISTS, boundVars, temp);
+       novelty = nm->mkNode(Kind::AND, novelty, temp);
+    }
+     Node temp = nm->mkNode(Kind::AND,
+       d_bodyAssump,
+       newApplied,
+       nm->mkNode(Kind::NOT, oldSols[oldSols.size()-1]));
+       temp = nm->mkNode(Kind::EXISTS, boundVars, temp);
+       novelty = nm->mkNode(Kind::AND, novelty, temp);
+       novelty = nm->mkNode(Kind::EXISTS, universe, novelty );
+   }  else if (options().quantifiers.sygusFilterSolMode
+           == options::SygusFilterSolMode::WEAK) {
+
+   for (int i =0; i<oldSols.size()-1; i++){
+       Node temp = nm->mkNode(Kind::AND,
+       d_bodyAssump,
+       nm->mkNode(Kind::NOT,oldSols[i+1]),
+       oldSols[i]);
+       temp = nm->mkNode(Kind::EXISTS, boundVars, temp);
+       novelty = nm->mkNode(Kind::AND, novelty, temp);
+    }
+     Node temp = nm->mkNode(Kind::AND,
+       d_bodyAssump,
+       nm->mkNode(Kind::NOT,newApplied),
+       oldSols[oldSols.size()-1]);
+       temp = nm->mkNode(Kind::EXISTS, boundVars, temp);
+       novelty = nm->mkNode(Kind::AND, novelty, temp);
+       novelty = nm->mkNode(Kind::EXISTS, universe, novelty );
+    }
+
+    
+    // if (!d_sygusVars.empty())
+    // {
+    
+    //novelty = nm->mkNode(Kind::EXISTS, boundVars, novelty);
+    //}
+    // create subsolver (already copies logic + options)
+// ------------------------------------------------------------
+// 1.Initialize subsolver
+// ------------------------------------------------------------
+std::unique_ptr<SolverEngine> noveltyCheck;
+initializeSygusSubsolver(noveltyCheck, d_smtSolver.getAssertions());
+
+// ------------------------------------------------------------
+// 2. Retrieve the *original assertions* list
+// ------------------------------------------------------------
+// const smt::Assertions& as = d_smtSolver.getAssertions();
+// const context::CDList<Node>& defs = as.getAssertionListDefinitions();
+
+// // ------------------------------------------------------------
+// // Assert JUST the definitions into the subsolver
+// // ------------------------------------------------------------
+// for (auto it = defs.begin(); it != defs.end(); ++it)
+// {
+//     noveltyCheck->assertFormula(*it);   // <-- definitions only
+// }
+
+// ------------------------------------------------------------
+// 4. Add novelty constraint
+// ------------------------------------------------------------
+// noveltyCheck->assertFormula(novelty);
+
+// // ------------------------------------------------------------
+// // 5. Run solver
+// // ------------------------------------------------------------
+// Result nr = noveltyCheck->checkSat();
+
+// // ------------------------------------------------------------
+// // 6. Handle result
+// // ------------------------------------------------------------
+// if (nr.isSat())
+// {
+//     Trace("novelty") << "Novelty SAT!\n";
+//     foundNovel = true;
+//     d_prevSolutions.push_back(newSol);
+// }
+// else
+// {
+//     Trace("novelty") << "Novelty UNSAT.\n";
+// }
+
+
+// pull assertions from the main solver
+
+
+/// Retrieve assertions using the new API
+// const smt::Assertions& as = d_smtSolver.getAssertions();
+
+// // Now get the underlying assertion list
+// const std::vector<Node>& al = as.getAssertionList();
+
+// // Assert all formulas into the novelty checker
+// for (const Node& a : al)
+// {
+//     noveltyCheck->assertFormula(a);
+// }
+
+// Finally assert novelty
+noveltyCheck->assertFormula(novelty);
+
+// Check satisfiability
+Result nr = noveltyCheck->checkSat();
+
+
+
+    if (nr.getStatus() == Result::SAT)
+    {
+        // ✅ NEW SOLUTION FOUND!
+        Trace("novelty") << "we got sat??..\n";
+        d_prevSolutions.push_back(newSol);
+        foundNovel = true;
+        break;
+    }
+    else
+    {
+        // ❌ Duplicate solution → get a new candidate
+        Trace("novelty") << "[SyGuS] Duplicate solution, resynthesizing...\n";
+
+        // Ask for another solution from the SyGuS subsolver
+        r = d_subsolver->checkSat();
+        continue; // loop again, getSynthSolutions() will get the new candidate
+    }
+}
+
+// --------------------------------------------------
+// At this point foundNovel == true and the solution is stored
+// --------------------------------------------------
+sr = SynthResult(SynthResult::SOLUTION);
+
+// Optional: run correctness check
+if (options().smt.checkSynthSol)
+{
+    Assertions& as = d_smtSolver.getAssertions();
+    checkSynthSolution(as, sol_map);
+}
+
+return sr;
+
 }
 
 bool SygusSolver::getSynthSolutions(std::map<Node, Node>& solMap)

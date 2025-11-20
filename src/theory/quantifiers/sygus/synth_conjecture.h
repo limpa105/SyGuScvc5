@@ -294,6 +294,8 @@ class SynthConjecture : protected EnvObj
   Node d_simp_quant;
   /** (negated) conjecture after simplification, conversion to deep embedding */
   Node d_embed_quant;
+
+  Node assumptions; 
   /**
    * The first index of an instantiation in CandidateInfo::d_inst that we have
    * not yet tried to repair.
