@@ -60,7 +60,7 @@ class SygusEnumeratorCallback : public SygusTermEnumeratorCallback,
    * @param bterms The (rewritten, builtin) terms we have already enumerated
    * @return true if n should be considered in the enumeration.
    */
-  bool addTerm(const Node& n, std::unordered_set<Node>& bterms) override;
+  bool addTerm(const Node& n, std::unordered_set<Node>& bterms, std::unordered_set<Node>& aterms) override;
 
   void setBlockingGrammarType(const TypeNode& stn) { d_blockingGrammarStn = stn; }
 

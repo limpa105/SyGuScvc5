@@ -119,19 +119,20 @@
     ;; CNF formula
     (F Bool (
       C
-      true
-      false
       (and F F)
     ))
 
     ;; Clause
     (C Bool (
        A
+      (not A)
       (or C C)
     ))
 
     ;; Atoms
     (A Bool (
+      true
+      false
       (Contains x y)
       (Covers x y)
       (CoveredBy x y)

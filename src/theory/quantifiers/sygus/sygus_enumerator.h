@@ -232,6 +232,8 @@ class SygusEnumerator : public EnumValGenerator
     std::vector<Node> d_terms;
     /** the set of builtin terms corresponding to the above list */
     std::unordered_set<Node> d_bterms;
+
+     std::unordered_set<Node> d_aterms;
     /**
      * The index of first term whose size is greater than or equal to that size,
      * if it exists.

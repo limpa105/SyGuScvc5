@@ -38,7 +38,8 @@ SygusEnumeratorCallback::SygusEnumeratorCallback(Env& env,
 
 
 bool SygusEnumeratorCallback::addTerm(const Node& n,
-                                      std::unordered_set<Node>& bterms)
+                                      std::unordered_set<Node>& bterms,
+                                      std::unordered_set<Node>& aterms)
 {
   Node bn = datatypes::utils::sygusToBuiltin(n);
   Node simp = d_env.getRewriter()->rewrite(bn);
@@ -84,13 +85,13 @@ bool SygusEnumeratorCallback::addTerm(const Node& n,
   // callback-specific add term (examples, etc.)
   
 
-  for (const Node& prev : bterms)
+  for (const Node& prev : aterms)
 {
   if (prev.getType() != bn.getType())
   {
     continue;
   }
-NodeManager* nm = nodeManager();
+  NodeManager* nm = nodeManager();
 
   // Build (not (= bn prev))
   Node eq = nm->mkNode(Kind::EQUAL, cval, prev);
@@ -166,7 +167,7 @@ if (!addTermInternal(n, bn, cval))
   }
 
 // Only store if it survived SMT equivalence checks
-  d_smtTerms.push_back(bnRaw);
+  aterms.insert(cval);
 
   Trace("sygus-enum-exc-call-inc") << "Included: " << bnRaw << "\n";
   return true;
