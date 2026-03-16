@@ -75,6 +75,15 @@ typedef expr::Attribute<SygusVarFreeAttributeId, Node> SygusVarFreeAttribute;
 namespace datatypes {
 namespace utils {
 
+bool isBuiltinTermInSygusGrammar(Env& env,const Node& t,
+                                 const TypeNode& stn,
+                                 bool allowVars);
+
+
+bool isBuiltinTermInSygusGrammarDbg(Env& env,
+                                    const Node& t,
+                                    const TypeNode& stn,
+                                    bool allowVars);
 
 /** get operator kind for sygus builtin
  *

@@ -953,6 +953,15 @@ void SolverEngine::declareSygusVar(Node var)
 
 void SolverEngine::declareSynthFun(Node func,
                                    TypeNode sygusType,
+                                   TypeNode blockingSygusType,
+                                   bool isInv,
+                                   const std::vector<Node>& vars)
+{
+  d_sygusSolver->declareSynthFun(func, sygusType, blockingSygusType, isInv, vars);
+}
+
+void SolverEngine::declareSynthFun(Node func,
+                                   TypeNode sygusType,
                                    bool isInv,
                                    const std::vector<Node>& vars)
 {

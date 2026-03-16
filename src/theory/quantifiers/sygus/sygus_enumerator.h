@@ -27,6 +27,7 @@
 #include "theory/quantifiers/sygus/enum_val_generator.h"
 #include "theory/quantifiers/sygus/sygus_enumerator_callback.h"
 #include "theory/quantifiers/sygus/term_database_sygus.h"
+#include "theory/quantifiers/sygus/sygus_utils.h"
 
 namespace cvc5::internal {
 namespace theory {
@@ -93,6 +94,9 @@ class SygusEnumerator : public EnumValGenerator
   bool isEnumShapes() const;
 
  private:
+
+
+
   /** pointer to term database sygus */
   TermDbSygus* d_tds;
   /** pointer to the enumerator callback we are using (if any) */
@@ -188,6 +192,8 @@ class SygusEnumerator : public EnumValGenerator
     /** set that we are finished enumerating terms */
     void setComplete();
 
+    unsigned getMaxAcceptedSize() const { return d_maxAcceptedSize; }
+
    private:
     /** reference to the statistics of parent */
     SygusStatistics* d_stats;
@@ -235,9 +241,23 @@ class SygusEnumerator : public EnumValGenerator
     unsigned d_sizeEnum;
     /** whether this term cache is complete */
     bool d_isComplete;
+
+    unsigned d_maxAcceptedSize;
   };
   /** above cache for each sygus type */
   std::map<TypeNode, TermCache> d_tcache;
+
+  bool d_fpDirty = true;                 // set when ANY cache successfully adds a term
+  size_t d_fpSnapshotTotalTerms = 0;     // total cached terms at last horizon recompute
+  unsigned d_fpGlobalHorizon = 0;        // H_global at last recompute
+
+  size_t getTotalCachedTerms() const;
+  unsigned computeTypeHorizon(TypeNode tn, unsigned defaultUpper) const;
+  void recomputeGlobalHorizon(unsigned defaultUpper);
+  void notifyCacheGrowth(TypeNode tn);
+
+
+
   /** initialize term cache for type tn */
   void initializeTermCache(TypeNode tn);
 

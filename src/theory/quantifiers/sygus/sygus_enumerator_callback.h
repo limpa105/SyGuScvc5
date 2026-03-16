@@ -25,6 +25,7 @@
 #include "smt/env_obj.h"
 #include "theory/quantifiers/extended_rewrite.h"
 
+
 namespace cvc5::internal {
 namespace theory {
 namespace quantifiers {
@@ -48,6 +49,8 @@ class SygusEnumeratorCallback : public SygusTermEnumeratorCallback,
                           ExampleEvalCache* eec = nullptr);
   virtual ~SygusEnumeratorCallback() {}
 
+
+
   /**
    * Add term, return true if the term should be considered in the enumeration.
    * Notice that returning false indicates that n should not be considered as a
@@ -58,6 +61,12 @@ class SygusEnumeratorCallback : public SygusTermEnumeratorCallback,
    * @return true if n should be considered in the enumeration.
    */
   bool addTerm(const Node& n, std::unordered_set<Node>& bterms) override;
+
+  void setBlockingGrammarType(const TypeNode& stn) { d_blockingGrammarStn = stn; }
+
+  std::vector<Node> d_smtTerms;
+
+  //bool isInBlockingGrammarBuiltin(const Node& bn) const;
 
  protected:
   /** Get the cache value for the given candidate */
@@ -80,6 +89,9 @@ class SygusEnumeratorCallback : public SygusTermEnumeratorCallback,
    * breaking).
    */
   ExampleEvalCache* d_eec;
+
+  TypeNode d_blockingGrammarStn;
+  
 };
 
 }  // namespace quantifiers

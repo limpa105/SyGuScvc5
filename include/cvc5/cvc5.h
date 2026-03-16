@@ -6828,6 +6828,13 @@ class CVC5_EXPORT Solver
                 Sort sort,
                 Grammar& grammar) const;
 
+
+  Term synthFun(const std::string& symbol,
+                const std::vector<Term>& boundVars,
+                Sort sort,
+                Grammar& grammar,
+                Grammar& blockingGrammar) const;
+
   /**
    * Add a forumla to the set of Sygus constraints.
    *
@@ -7092,7 +7099,8 @@ class CVC5_EXPORT Solver
                       const std::vector<Term>& boundVars,
                       const Sort& sort,
                       bool isInv = false,
-                      Grammar* grammar = nullptr) const;
+                      Grammar* grammar = nullptr,
+                      Grammar* blockingGrammar = nullptr) const;
 
   /** Helper for getting timeout cores */
   std::pair<Result, std::vector<Term>> getTimeoutCoreHelper(

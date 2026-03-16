@@ -98,6 +98,13 @@ class SygusSolver : protected EnvObj
                        bool isInv,
                        const std::vector<Node>& vars);
 
+
+  void declareSynthFun(Node func,
+                     TypeNode sygusType,
+                     TypeNode blockingSygusType,
+                     bool isInv,
+                     const std::vector<Node>& vars);
+
   /** Add a regular sygus constraint or assumption.*/
   void assertSygusConstraint(Node n, bool isAssume);
 

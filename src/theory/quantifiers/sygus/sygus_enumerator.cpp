@@ -27,6 +27,7 @@
 #include "theory/rewriter.h"
 #include "util/rational.h"
 
+
 using namespace cvc5::internal::kind;
 
 namespace cvc5::internal {
@@ -63,11 +64,65 @@ void SygusEnumerator::initialize(Node e)
     d_secd = std::make_unique<SygusEnumeratorCallback>(d_env, d_tds, d_stats);
     d_sec = d_secd.get();
   }
+  Trace("sygus-block") << "SE::init(" << e << ") ENTER"
+                     << " d_secd=" << (d_secd ? "non-null" : "null")
+                     << " d_sec=" << (d_sec ? "non-null" : "null")
+                     << " d_tds=" << (d_tds ? "non-null" : "null")
+                     << "\n";
+
+Trace("sygus-block") << "SE::init step A\n";
+
+TypeNode blk = SygusUtils::getSygusBlockingType(e);
+
+Trace("sygus-block") << "SE::init step B blk=" << blk
+                     << " isNull=" << blk.isNull()
+                     << " isDatatype=" << (!blk.isNull() && blk.isDatatype())
+                     << " isSygusDatatype=" << (!blk.isNull() && blk.isSygusDatatype())
+                     << "\n";
+
+if (!blk.isNull() && blk.isDatatype())
+{
+  const DType& dt = blk.getDType();
+  Trace("sygus-block") << "SE::init step B2 dt.isSygus=" << dt.isSygus()
+                       << " dt.name=" << dt.getName() << "\n";
+  if (dt.isSygus())
+  {
+    Trace("sygus-block") << "SE::init step B3 dt.sygusType=" << dt.getSygusType()
+                         << " dt.varList=" << dt.getSygusVarList() << "\n";
+  }
+}
+
+Trace("sygus-block") << "SE::init step C\n";
+
+if (!blk.isNull())
+{
+  Trace("sygus-block") << "SE::init step D about to dynamic_cast d_secd\n";
+  auto* sec = dynamic_cast<SygusEnumeratorCallback*>(d_sec);
+  Trace("sygus-block") << "SE::init step E sec=" << (sec ? "non-null" : "null")
+                       << "\n";
+  Assert(sec != nullptr);
+
+  Trace("sygus-block") << "SE::init step F about to call setBlockingGrammarType\n";
+  sec->setBlockingGrammarType(blk);
+  Trace("sygus-block") << "SE::init step G returned from setBlockingGrammarType\n";
+}
+else
+{
+  Trace("sygus-block") << "SE::init no blockingType\n";
+}
+
+Trace("sygus-block") << "SE::init step H EXIT\n";
+
   d_etype = d_enum.getType();
   Assert(d_etype.isDatatype());
   Assert(d_etype.getDType().isSygus());
   d_tlEnum = getMasterEnumForType(d_etype);
   d_abortSize = options().datatypes.sygusAbortSize;
+  d_fpDirty = true;
+  d_fpGlobalHorizon = 0;
+  d_fpSnapshotTotalTerms = getTotalCachedTerms();
+  Trace("sygus-fp") << "fp: enabled-by-default, initial totalTerms="
+                    << d_fpSnapshotTotalTerms << "\n";
 
   // if we don't have a term database, we don't register symmetry breaking
   // lemmas
@@ -183,7 +238,8 @@ SygusEnumerator::TermCache::TermCache()
       d_isSygusType(false),
       d_numConClasses(0),
       d_sizeEnum(0),
-      d_isComplete(false)
+      d_isComplete(false),
+      d_maxAcceptedSize(0)
 {
 }
 
@@ -214,6 +270,7 @@ void SygusEnumerator::TermCache::initialize(SygusStatistics* s,
   }
 
   d_isSygusType = true;
+  d_maxAcceptedSize = 0;
 
   // get argument types for all constructors
   std::map<unsigned, std::vector<TypeNode>> argTypes;
@@ -360,6 +417,11 @@ bool SygusEnumerator::TermCache::addTerm(Node n)
   if (d_stats != nullptr)
   {
     ++(d_stats->d_enumTerms);
+  }
+  unsigned sz = datatypes::utils::getSygusTermSize(n);
+  if (sz > d_maxAcceptedSize)
+  {
+    d_maxAcceptedSize = sz;
   }
   d_terms.push_back(n);
   return true;
@@ -563,6 +625,83 @@ void SygusEnumerator::initializeTermCache(TypeNode tn)
   // initialize the term cache
   d_tcache[tn].initialize(d_stats, d_enum, tn, d_sec);
 }
+
+size_t SygusEnumerator::getTotalCachedTerms() const
+{
+  size_t total = 0;
+  for (const auto& p : d_tcache)
+  {
+    total += p.second.getNumTerms();
+  }
+  return total;
+}
+
+unsigned SygusEnumerator::computeTypeHorizon(TypeNode tn,
+                                             unsigned defaultUpper) const
+{
+  if (tn.isNull() || !tn.isDatatype())
+  {
+    return defaultUpper;
+  }
+  const DType& dt = tn.getDType();
+  if (!dt.isSygus())
+  {
+    return defaultUpper;
+  }
+
+  unsigned H = 0;
+  for (unsigned i = 0, ncons = dt.getNumConstructors(); i < ncons; i++)
+  {
+    unsigned hi = dt[i].getWeight();
+    for (unsigned j = 0, nargs = dt[i].getNumArgs(); j < nargs; j++)
+    {
+      TypeNode at = dt[i].getArgType(j);
+      // If we have a cache for the argument type, use its max accepted size,
+      // otherwise use a safe over-approx (defaultUpper).
+      auto it = d_tcache.find(at);
+      unsigned M = defaultUpper;
+      if (it != d_tcache.end())
+      {
+        M = it->second.getMaxAcceptedSize();
+      }
+      hi += M;
+    }
+    H = std::max(H, hi);
+  }
+  return H;
+}
+
+void SygusEnumerator::recomputeGlobalHorizon(unsigned defaultUpper)
+{
+  unsigned Hg = 0;
+  for (const auto& p : d_tcache)
+  {
+    TypeNode tn = p.first;
+    unsigned ht = computeTypeHorizon(tn, defaultUpper);
+    Hg = std::max(Hg, ht);
+
+    Trace("sygus-fp") << "fp: type=" << tn
+                      << " H=" << ht
+                      << " M=" << p.second.getMaxAcceptedSize()
+                      << " #terms=" << p.second.getNumTerms()
+                      << "\n";
+  }
+  d_fpGlobalHorizon = Hg;
+  d_fpSnapshotTotalTerms = getTotalCachedTerms();
+  d_fpDirty = false;
+
+  Trace("sygus-fp") << "fp: recompute GLOBAL H_global=" << d_fpGlobalHorizon
+                    << " snapshotTotalTerms=" << d_fpSnapshotTotalTerms
+                    << "\n";
+}
+
+void SygusEnumerator::notifyCacheGrowth(TypeNode tn)
+{
+  d_fpDirty = true;
+  Trace("sygus-fp") << "fp: growth type=" << tn << "\n";
+}
+
+
 
 SygusEnumerator::TermEnum* SygusEnumerator::getMasterEnumForType(TypeNode tn)
 {
@@ -842,6 +981,41 @@ bool SygusEnumerator::TermEnumMaster::incrementInternal()
 
     // push the bound
     tc.pushEnumSizeIndex();
+        // ------------------------------------------------------------
+    // Global fixpoint check (top-level only), enabled by default.
+    // ------------------------------------------------------------
+    if (d_se->d_tlEnum == this)
+    {
+      unsigned defaultUpper = d_currSize;
+
+      if (d_se->d_fpDirty)
+      {
+        Trace("sygus-fp") << "fp: size boundary " << d_currSize
+                          << " dirty=1 -> recompute\n";
+        d_se->recomputeGlobalHorizon(defaultUpper);
+      }
+      else
+      {
+        size_t tot = d_se->getTotalCachedTerms();
+        Trace("sygus-fp") << "fp: size boundary " << d_currSize
+                          << " dirty=0 H_global=" << d_se->d_fpGlobalHorizon
+                          << " tot=" << tot
+                          << " snap=" << d_se->d_fpSnapshotTotalTerms
+                          << "\n";
+
+        if (d_currSize > d_se->d_fpGlobalHorizon
+            && tot == d_se->d_fpSnapshotTotalTerms)
+        {
+          Trace("sygus-fp") << "fp: GLOBAL FIXPOINT REACHED — terminating\n";
+          for (auto& p : d_se->d_tcache)
+          {
+            p.second.setComplete();
+          }
+          tc.setComplete();
+          return false;
+        }
+      }
+    }
 
     // restart with constructor class one (skip nullary constructors)
     d_consClassNum = 1;
@@ -886,6 +1060,8 @@ bool SygusEnumerator::TermEnumMaster::incrementInternal()
           // we will return null (d_currTermSet is true at this point)
           Assert(d_currTermSet);
           d_currTerm = Node::null();
+        } else {
+          d_se->notifyCacheGrowth(d_tn);
         }
       }
       return true;
@@ -1176,7 +1352,11 @@ bool SygusEnumerator::TermEnumMasterInterp::increment()
   }
   SygusEnumerator::TermCache& tc = d_se->d_tcache[d_tn];
   Node curr = getCurrent();
-  tc.addTerm(curr);
+  bool added = tc.addTerm(curr);
+  if (added)
+  {
+    d_se->notifyCacheGrowth(d_tn);
+  }
   if (tc.getNumTerms() == d_nextIndexEnd)
   {
     tc.pushEnumSizeIndex();
@@ -1197,7 +1377,11 @@ bool SygusEnumerator::TermEnumMasterFv::initialize(SygusEnumerator* se,
   Node ret = getCurrent();
   AlwaysAssert(!ret.isNull());
   SygusEnumerator::TermCache& tc = d_se->d_tcache[d_tn];
-  tc.addTerm(ret);
+   bool added = tc.addTerm(ret);
+  if (added)
+  {
+    d_se->notifyCacheGrowth(d_tn);
+  }
   return true;
 }
 
@@ -1220,6 +1404,7 @@ bool SygusEnumerator::TermEnumMasterFv::increment()
                              << curr << std::endl;
   bool ret = tc.addTerm(curr);
   AlwaysAssert(ret);
+  d_se->notifyCacheGrowth(d_tn);
   return true;
 }
 

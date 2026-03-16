@@ -124,6 +124,11 @@ class SygusUtils
    * type if it has one.
    */
   static Node mkSygusTermFor(const Node& f);
+
+
+  static void setSygusBlockingType(Node n, TypeNode tn);
+  static TypeNode getSygusBlockingType(Node n);
+  static bool hasSygusBlockingType(Node n);
 };
 
 }  // namespace quantifiers

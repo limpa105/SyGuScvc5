@@ -185,6 +185,7 @@ void Cegis::getTermList(const std::vector<Node>& candidates,
 bool Cegis::addEvalLemmas(const std::vector<Node>& candidates,
                           const std::vector<Node>& candidate_values)
 {
+  return false;
   // First, decide if this call will apply "conjecture-specific refinement".
   // In other words, in some settings, the following method will identify and
   // block a class of solutions {candidates -> S} that generalizes the current
@@ -309,6 +310,18 @@ bool Cegis::constructCandidates(const std::vector<Node>& enums,
                                 const std::vector<Node>& candidates,
                                 std::vector<Node>& candidate_values)
 {
+   candidate_values.clear();
+   candidate_values.insert(
+       candidate_values.end(), enum_values.begin(), enum_values.end());
+    Trace("sygus-engine") << "  * (enum-only) candidate = ";
+    for (const Node& cv : candidate_values)
+    {
+      TermDbSygus::toStreamSygus("sygus-engine", cv);
+      Trace("sygus-engine") << " ";
+    }
+    Trace("sygus-engine") << std::endl;
+    return true;
+   
   if (TraceIsOn("cegis"))
   {
     Trace("cegis") << "  Enumerators :\n";

@@ -97,6 +97,11 @@ void SynthEngine::check(Theory::Effort e, QEffort quant_e)
       activeCheckConj.push_back(sc);
     }
   }
+  if (activeCheckConj.empty())
+  {
+    return;
+  }
+
   std::vector<SynthConjecture*> acnext;
   ResourceManager* rm = d_env.getResourceManager();
   do

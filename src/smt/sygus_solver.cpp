@@ -94,6 +94,41 @@ void SygusSolver::declareSynthFun(Node fn,
   d_sygusConjectureStale = true;
 }
 
+void SygusSolver::declareSynthFun(Node fn,
+                                 TypeNode sygusType,
+                                 TypeNode blockingSygusType,
+                                 bool isInv,
+                                 const std::vector<Node>& vars)
+{
+  Trace("smt") << "SygusSolver::declareSynthFun: " << fn << "\n";
+  NodeManager* nm = nodeManager();
+  d_sygusFunSymbols.push_back(fn);
+
+  if (!vars.empty())
+  {
+    Node bvl = nm->mkNode(Kind::BOUND_VAR_LIST, vars);
+    quantifiers::SygusUtils::setSygusArgumentList(fn, bvl);
+  }
+
+  // Main grammar/type
+  if (!sygusType.isNull() && sygusType.isDatatype() && sygusType.getDType().isSygus())
+  {
+    quantifiers::SygusUtils::setSygusType(fn, sygusType);
+    checkDefinitionsSygusDt(fn, sygusType);
+  }
+
+  // Blocking grammar/type
+  if (!blockingSygusType.isNull() && blockingSygusType.isDatatype()
+      && blockingSygusType.getDType().isSygus())
+  {
+    quantifiers::SygusUtils::setSygusBlockingType(fn, blockingSygusType);
+    checkDefinitionsSygusDt(fn, blockingSygusType);
+  }
+
+  d_sygusConjectureStale = true;
+}
+
+
 void SygusSolver::assertSygusConstraint(Node n, bool isAssume)
 {
   if (n.getKind() == Kind::AND)
@@ -214,9 +249,9 @@ void SygusSolver::assertSygusInvConstraint(Node inv,
 
 SynthResult SygusSolver::checkSynth(bool isNext)
 {
-  Trace("smt") << "SygusSolver::checkSynth" << std::endl;
+  Trace("smt-help") << "SygusSolver::checkSynth" << std::endl;
   // if applicable, check if the subsolver is the correct one
-  if (!isNext || d_prevSolutions.size() > 0 )
+  if (!isNext  )
   {
     // if we are not using check-synth-next, we always reconstruct the solver.
     d_sygusConjectureStale = true;
@@ -242,7 +277,7 @@ SynthResult SygusSolver::checkSynth(bool isNext)
     NodeManager* nm = nodeManager();
     // build synthesis conjecture from asserted constraints and declared
     // variables/functions
-    Trace("smt") << "Sygus : Constructing sygus constraint...\n";
+    Trace("smt-help") << "CONJECTURE STALE\n";
     Node body = nm->mkAnd(listToVector(d_sygusConstraints));
     // note that if there are no constraints, then assumptions are irrelevant
     if (!d_sygusConstraints.empty() && !d_sygusAssumps.empty())
@@ -333,10 +368,11 @@ std::vector<Node> callArgs;
 
   if (callArgs.empty())
   {
-    std::cout << "[SyGuS] WARNING: did not find pred_f application; skipping.\n";
+    Trace("smt-debug") << "[SyGuS] WARNING: did not find pred_f application; skipping.\n";
   }
   else
-  {
+  { 
+    Trace("smt-debug") << "The call args are" << callArgs << "\n";
     d_callArgs = callArgs;
     // ---------------------------------------------
     // 2) Build pred_f(callArgs...)
@@ -398,7 +434,7 @@ std::vector<Node> callArgs;
   }
 
 
-      }
+} // STOP HERE
     }
     body = body.notNode();
     Trace("smt-debug") << "...constructed sygus constraint " << body
@@ -509,6 +545,91 @@ std::vector<Node> callArgs;
     Assert(d_subsolver != nullptr);
   }
   Result r;
+  // ------------------------------------------------------------
+// Ensure d_callArgs is available even if conjecture is NOT stale.
+// This handles: (!d_sygusConjectureStale && !d_prevSolutions.empty() && d_callArgs.empty())
+// ------------------------------------------------------------
+if (!d_prevSolutions.empty() && d_callArgs.empty() && !d_sygusFunSymbols.empty())
+{
+  Node f = d_sygusFunSymbols[0];
+  Node globalF = f;
+
+  if (d_conj.isNull())
+  {
+    Trace("smt-debug") << "[SyGuS] WARNING: d_conj is null; cannot extract call args in non-stale path.\n";
+  }
+  else
+  {
+    Node searchRoot = rewrite(d_conj);
+
+    // Use the bound copy of f if mkSygusConjecture wrapped it in a forall
+    Node fSym = globalF;
+    if (searchRoot.getKind() == Kind::FORALL)
+    {
+      for (const Node& v : searchRoot[0])
+      {
+        if (v.getType() == globalF.getType())
+        {
+          fSym = v;
+          break;
+        }
+      }
+    }
+
+    std::vector<Node> callArgs;
+    {
+      std::vector<Node> st{searchRoot};
+      while (!st.empty() && callArgs.empty())
+      {
+        Node cur = st.back();
+        st.pop_back();
+
+        if (cur.getKind() == Kind::APPLY_UF)
+        {
+          if (cur.getOperator() == fSym)
+          {
+            for (const Node& c : cur) callArgs.push_back(c);
+            break;
+          }
+        }
+        else if (cur.getKind() == Kind::HO_APPLY)
+        {
+          std::vector<Node> collected;
+          Node head = cur;
+          while (head.getKind() == Kind::HO_APPLY)
+          {
+            collected.insert(collected.begin(), head[1]);
+            head = head[0];
+          }
+
+          if (head == fSym)
+          {
+            callArgs = std::move(collected);
+            break;
+          }
+          else if (head.getKind() == Kind::APPLY_UF && head.getOperator() == fSym)
+          {
+            for (const Node& c : head) callArgs.push_back(c);
+            callArgs.insert(callArgs.end(), collected.begin(), collected.end());
+            break;
+          }
+        }
+
+        for (const Node& c : cur) st.push_back(c);
+      }
+    }
+
+    if (callArgs.empty())
+    {
+      Trace("smt-debug") << "[SyGuS] WARNING: could not extract call args in non-stale path.\n";
+    }
+    else
+    {
+      d_callArgs = callArgs;
+      Trace("smt-debug") << "[SyGuS] Extracted call args in non-stale path: " << d_callArgs << "\n";
+    }
+  }
+}
   if (usingSygusSubsolver())
   {
     Trace("smt-sygus") << "SygusSolver: check sat with subsolver..." << std::endl;
@@ -555,7 +676,6 @@ SynthResult sr;
 std::map<Node, Node> sol_map;
 
 bool foundNovel = false;
-
 // -----------------------------
 // Loop until we find a NEW solution
 // -----------------------------

@@ -25,6 +25,9 @@
 #include "theory/evaluator.h"
 #include "theory/rewriter.h"
 #include "theory/trust_substitutions.h"
+#include <functional>
+#include <unordered_map>
+#include <unordered_set>
 
 using namespace cvc5::internal;
 using namespace cvc5::internal::kind;
@@ -33,6 +36,439 @@ namespace cvc5::internal {
 namespace theory {
 namespace datatypes {
 namespace utils {
+
+// Put this near the top of sygus_datatype_utils.cpp (same file as you showed).
+// Uses Trace("sygus-bg-mem") channel for all debug output.
+
+
+// ============================================================
+// DEBUG: builtin-term membership in a sygus datatype grammar
+// Trace channel: "sygus-bg-mem"
+// ============================================================
+
+// ============================================================
+// DEBUG: builtin-term membership in a sygus datatype grammar
+// Trace channel: "sygus-bg-mem"
+// ============================================================
+
+static void dbgIndent(size_t d)
+{
+  for (size_t i = 0; i < d; ++i) Trace("sygus-bg-mem") << "  ";
+}
+
+static void dbgPrintNode(const char* tag, const Node& n, size_t d = 0)
+{
+  dbgIndent(d);
+  Trace("sygus-bg-mem") << tag << " = " << n << " | kind=" << n.getKind()
+                        << " type=" << n.getType()
+                        << " nchildren=" << n.getNumChildren()
+                        << " isNull=" << n.isNull() << " isVar=" << n.isVar()
+                        << " isConst=" << n.isConst() << "\n";
+}
+
+static void dbgPrintDType(const char* tag, const DType& dt, size_t d = 0)
+{
+  dbgIndent(d);
+  Trace("sygus-bg-mem") << tag << " DType name=" << dt.getName()
+                        << " isSygus=" << dt.isSygus()
+                        << " sygusType="
+                        << (dt.isSygus() ? dt.getSygusType() : TypeNode())
+                        << " #cons=" << dt.getNumConstructors()
+                        << " allowConst="
+                        << (dt.isSygus() ? dt.getSygusAllowConst() : false)
+                        << " allowAll="
+                        << (dt.isSygus() ? dt.getSygusAllowAll() : false)
+                        << "\n";
+  for (size_t i = 0, n = dt.getNumConstructors(); i < n; ++i)
+  {
+    const DTypeConstructor& c = dt[i];
+    dbgIndent(d);
+    Trace("sygus-bg-mem") << "  [" << i << "] cname=" << c.getName()
+                          << " nargs=" << c.getNumArgs()
+                          << " weight=" << c.getWeight()
+                          << " ctorNode=" << c.getConstructor()
+                          << " sygusOp="
+                          << (dt.isSygus() ? c.getSygusOp() : Node()) << "\n";
+  }
+}
+
+// --- memo key: (TypeNode, Node) ---
+struct TnNodeKey
+{
+  TypeNode d_tn;
+  Node d_n;
+  bool operator==(const TnNodeKey& o) const
+  {
+    return d_tn == o.d_tn && d_n == o.d_n;
+  }
+};
+
+struct TnNodeKeyHash
+{
+  size_t operator()(const TnNodeKey& k) const
+  {
+    size_t h1 = std::hash<TypeNode>{}(k.d_tn);
+    size_t h2 = std::hash<Node>{}(k.d_n);
+    return h1 ^ (h2 + 0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2));
+  }
+};
+
+// Match `templ` against `t`
+// - `templ` and `t` are *builtin* terms here.
+// - Only treat *hole variables* (those in `holesBuiltin`) as wildcards.
+// - Any other bound variables (e.g. lambda binders) must match structurally.
+static bool matchTemplateDbg(const Node& templ,
+                             const Node& t,
+                             const std::unordered_set<Node>& holesBuiltin,
+                             std::unordered_map<Node, Node>& holeSubs,
+                             size_t depth = 0)
+{
+  dbgIndent(depth);
+  Trace("sygus-bg-mem") << "matchTemplateDbg: templ=" << templ << "  t=" << t
+                        << "\n";
+
+  // Hole?
+  if (templ.getKind() == Kind::BOUND_VARIABLE)
+  {
+    if (holesBuiltin.find(templ) != holesBuiltin.end())
+    {
+      // This bound var is a hole placeholder. Enforce consistent substitution.
+      auto it = holeSubs.find(templ);
+      if (it == holeSubs.end())
+      {
+        holeSubs.emplace(templ, t);
+        dbgIndent(depth);
+        Trace("sygus-bg-mem") << "  HOLE bind: " << templ << " := " << t << "\n";
+        return true;
+      }
+      bool ok = (it->second == t);
+      dbgIndent(depth);
+      Trace("sygus-bg-mem") << "  HOLE check: " << templ << " was " << it->second
+                            << " now " << t << " -> " << ok << "\n";
+      return ok;
+    }
+    // Not a hole: must match exactly.
+    bool ok = (templ == t);
+    dbgIndent(depth);
+    Trace("sygus-bg-mem") << "  BOUND_VARIABLE (non-hole) exact match -> " << ok
+                          << "\n";
+    return ok;
+  }
+
+  // Non-hole leaf
+  if (templ.getNumChildren() == 0 && t.getNumChildren() == 0)
+  {
+    bool ok = (templ == t);
+    dbgIndent(depth);
+    Trace("sygus-bg-mem") << "  LEAF exact -> " << ok << "\n";
+    return ok;
+  }
+
+  // Structural checks
+  if (templ.getKind() != t.getKind())
+  {
+    dbgIndent(depth);
+    Trace("sygus-bg-mem") << "  FAIL kind mismatch\n";
+    return false;
+  }
+  if (templ.getNumChildren() != t.getNumChildren())
+  {
+    dbgIndent(depth);
+    Trace("sygus-bg-mem") << "  FAIL arity mismatch\n";
+    return false;
+  }
+  // Operators must match for parameterized kinds.
+  if (templ.hasOperator() || t.hasOperator())
+  {
+    if (!templ.hasOperator() || !t.hasOperator()
+        || templ.getOperator() != t.getOperator())
+    {
+      dbgIndent(depth);
+      Trace("sygus-bg-mem") << "  FAIL operator mismatch\n";
+      return false;
+    }
+  }
+
+  for (size_t i = 0, n = templ.getNumChildren(); i < n; ++i)
+  {
+    if (!matchTemplateDbg(templ[i], t[i], holesBuiltin, holeSubs, depth + 1))
+    {
+      dbgIndent(depth);
+      Trace("sygus-bg-mem") << "  FAIL child " << i << "\n";
+      return false;
+    }
+  }
+  dbgIndent(depth);
+  Trace("sygus-bg-mem") << "  OK\n";
+  return true;
+}
+
+// Forward decl (mutual recursion)
+static bool isBuiltinInGrammarRecDbg(
+    Env& env,
+    const Node& t,
+    const TypeNode& stn,
+    bool allowVars,
+    std::unordered_map<TnNodeKey, bool, TnNodeKeyHash>& memo,
+    size_t depth);
+
+// Helper: try one constructor as a template; if it matches, recurse on children.
+static bool tryConstructorDbg(
+    Env& env,
+    const Node& t,
+    const TypeNode& stn,
+    size_t cindex,
+    bool allowVars,
+    std::unordered_map<TnNodeKey, bool, TnNodeKeyHash>& memo,
+    size_t depth)
+{
+  const DType& gdt = stn.getDType();
+  const DTypeConstructor& c = gdt[cindex];
+
+  dbgIndent(depth);
+  Trace("sygus-bg-mem") << "tryConstructorDbg: cindex=" << cindex
+                        << " cname=" << c.getName()
+                        << " nargs=" << c.getNumArgs()
+                        << " sygusOp=" << c.getSygusOp() << "\n";
+
+  NodeManager* nm = t.getNodeManager();
+
+  // Nullary constructor: check if its builtin form equals `t`.
+  if (c.getNumArgs() == 0)
+  {
+    // Build the sygus term: (APPLY_CONSTRUCTOR ctor)
+    Node sz = nm->mkNode(Kind::APPLY_CONSTRUCTOR, c.getConstructor());
+    Node bt = env.getRewriter()->rewrite(sygusToBuiltin(sz, /*isExternal=*/true));
+    dbgIndent(depth);
+    Trace("sygus-bg-mem") << "  nullary builtin=" << bt << "\n";
+
+    bool ok = (bt == t);
+    dbgIndent(depth);
+    Trace("sygus-bg-mem") << "  nullary match -> " << ok << "\n";
+    return ok;
+  }
+
+  // N-ary constructor: make a sygus template term with HOLE vars as children.
+  std::vector<Node> args;
+  args.push_back(c.getConstructor());
+
+  // IMPORTANT FIX:
+  // templB is builtin, so holes must be tracked as builtin bound vars that
+  // occur in templB (i.e., sygusToBuiltin(holeS)).
+  std::unordered_set<Node> holesBuiltin;
+
+  // Map builtin-hole-var -> child nonterminal type
+  std::unordered_map<Node, TypeNode> holeBuiltinToChildNt;
+
+  for (size_t j = 0, nargs = c.getNumArgs(); j < nargs; ++j)
+  {
+    TypeNode childNt = c.getArgType(j);
+    std::stringstream ss;
+    ss << "HOLE_" << c.getName() << "_" << j;
+
+    // Sygus-typed hole variable (bound var at sygus datatype type)
+    Node holeS = NodeManager::mkBoundVar(ss.str(), childNt);
+    args.push_back(holeS);
+
+    // Builtin hole variable (what appears in templB after sygusToBuiltin + rewrite)
+    Node holeB = sygusToBuiltin(holeS, /*isExternal=*/true);
+    holesBuiltin.insert(holeB);
+    holeBuiltinToChildNt.emplace(holeB, childNt);
+
+    dbgIndent(depth);
+    Trace("sygus-bg-mem") << "  hole[" << j << "] sygus=" << holeS
+                          << " builtin=" << holeB
+                          << " childNt=" << childNt << "\n";
+  }
+
+  Node templS = nm->mkNode(Kind::APPLY_CONSTRUCTOR, args);
+  Node templB = env.getRewriter()->rewrite(sygusToBuiltin(templS, /*isExternal=*/true));
+
+  dbgIndent(depth);
+  Trace("sygus-bg-mem") << "  templS=" << templS << "\n";
+  dbgIndent(depth);
+  Trace("sygus-bg-mem") << "  templB=" << templB << "\n";
+  dbgIndent(depth);
+  Trace("sygus-bg-mem") << "  target t=" << t << "\n";
+
+  std::unordered_map<Node, Node> holeSubs;  // builtinHoleVar -> matched subterm
+  if (!matchTemplateDbg(templB, t, holesBuiltin, holeSubs, depth + 1))
+  {
+    dbgIndent(depth);
+    Trace("sygus-bg-mem") << "  template did NOT match\n";
+    return false;
+  }
+
+  dbgIndent(depth);
+  Trace("sygus-bg-mem") << "  template matched; checking children obligations\n";
+
+  // For each hole substitution, recurse with the appropriate child nonterminal.
+  for (const auto& kv : holeSubs)
+  {
+    Node holeB = kv.first;
+    Node subterm = kv.second;
+
+    auto itNt = holeBuiltinToChildNt.find(holeB);
+    if (itNt == holeBuiltinToChildNt.end())
+    {
+      dbgIndent(depth);
+      Trace("sygus-bg-mem")
+          << "  WARNING: holeB not found in holeBuiltinToChildNt: " << holeB
+          << "\n";
+      return false;
+    }
+
+    TypeNode childNt = itNt->second;
+    dbgIndent(depth);
+    Trace("sygus-bg-mem") << "  recurse childNt=" << childNt
+                          << " subterm=" << subterm << "\n";
+
+    if (!isBuiltinInGrammarRecDbg(env, subterm, childNt, allowVars, memo,
+                                  depth + 1))
+    {
+      dbgIndent(depth);
+      Trace("sygus-bg-mem") << "  FAIL childNt=" << childNt << "\n";
+      return false;
+    }
+  }
+
+  dbgIndent(depth);
+  Trace("sygus-bg-mem") << "  SUCCESS via constructor " << c.getName() << "\n";
+  return true;
+}
+
+bool isBuiltinTermInSygusGrammar(Env& env,
+                                 const Node& t,
+                                 const TypeNode& stn,
+                                 bool allowVars)
+{
+  Trace("sygus-bg-mem") << "isBuiltinTermInSygusGrammar: t=" << t
+                        << " kind=" << t.getKind()
+                        << " type=" << t.getType()
+                        << " stn=" << stn
+                        << " allowVars=" << allowVars << "\n";
+
+  if (stn.isNull() || !stn.isDatatype() || !stn.getDType().isSygus())
+  {
+    Trace("sygus-bg-mem") << "  top FAIL: stn not a sygus datatype\n";
+    return false;
+  }
+
+  std::unordered_map<TnNodeKey, bool, TnNodeKeyHash> memo;
+  return isBuiltinInGrammarRecDbg(env, t, stn, allowVars, memo, 0);
+}
+
+static bool isBuiltinInGrammarRecDbg(
+    Env& env,
+    const Node& t,
+    const TypeNode& stn,
+    bool allowVars,
+    std::unordered_map<TnNodeKey, bool, TnNodeKeyHash>& memo,
+    size_t depth)
+{
+  dbgIndent(depth);
+  Trace("sygus-bg-mem") << "isBuiltinInGrammarRecDbg: stn=" << stn << " t=" << t
+                        << "\n";
+
+  if (stn.isNull() || !stn.isDatatype() || !stn.getDType().isSygus())
+  {
+    dbgIndent(depth);
+    Trace("sygus-bg-mem") << "  FAIL: stn null/non-datatype/non-sygus\n";
+    return false;
+  }
+
+  // Memo (use rewritten t to reduce churn)
+  Node tr = env.getRewriter()->rewrite(t);
+  TnNodeKey key{stn, tr};
+  auto itM = memo.find(key);
+  if (itM != memo.end())
+  {
+    dbgIndent(depth);
+    Trace("sygus-bg-mem") << "  MEMO hit -> " << itM->second << "\n";
+    return itM->second;
+  }
+
+  const DType& gdt = stn.getDType();
+  dbgPrintDType("  grammar", gdt, depth);
+
+  // Try each constructor as a template.
+  bool ok = false;
+  for (size_t i = 0, ncons = gdt.getNumConstructors(); i < ncons; ++i)
+  {
+    if (tryConstructorDbg(env, tr, stn, i, allowVars, memo, depth + 1))
+    {
+      ok = true;
+      break;
+    }
+  }
+
+  memo.emplace(key, ok);
+  dbgIndent(depth);
+  Trace("sygus-bg-mem") << "  RESULT for (stn=" << stn << ", t=" << tr
+                        << ") -> " << ok << "\n";
+  return ok;
+}
+
+
+
+// Public debug entrypoint.
+// Put this next to the real isBuiltinTermInSygusGrammar (do not replace it).
+
+bool isBuiltinTermInSygusGrammarDbg(Env& env,
+                                    const Node& t,
+                                    const TypeNode& stn,
+                                    bool allowVars)
+{
+  Trace("sygus-bg-mem") << "====================================================\n";
+  Trace("sygus-bg-mem") << "isBuiltinTermInSygusGrammarDbg\n";
+  Trace("sygus-bg-mem") << "  t          = " << t << "\n";
+  Trace("sygus-bg-mem") << "  t.kind     = " << t.getKind() << "\n";
+  Trace("sygus-bg-mem") << "  t.type     = " << t.getType() << "\n";
+  Trace("sygus-bg-mem") << "  t.isConst  = " << t.isConst() << "\n";
+  Trace("sygus-bg-mem") << "  t.isVar    = " << t.isVar() << "\n";
+  Trace("sygus-bg-mem") << "  t.nchild   = " << t.getNumChildren() << "\n";
+  Trace("sygus-bg-mem") << "  stn        = " << stn << "\n";
+  Trace("sygus-bg-mem") << "  stn.isNull = " << stn.isNull() << "\n";
+  Trace("sygus-bg-mem") << "  allowVars  = " << allowVars << "\n";
+
+  if (stn.isNull() || !stn.isDatatype())
+  {
+    Trace("sygus-bg-mem") << "  FAIL: stn is null or not a datatype\n";
+    Trace("sygus-bg-mem") << "====================================================\n";
+    return false;
+  }
+
+  const DType& gdt = stn.getDType();
+  Trace("sygus-bg-mem") << "  grammar dt name=" << gdt.getName()
+                        << " isSygus=" << gdt.isSygus()
+                        << " #cons=" << gdt.getNumConstructors() << "\n";
+
+  if (gdt.isSygus())
+  {
+    Trace("sygus-bg-mem") << "  sygus builtin type = " << gdt.getSygusType()
+                          << "\n";
+    Trace("sygus-bg-mem") << "  allowConst=" << gdt.getSygusAllowConst()
+                          << " allowAll=" << gdt.getSygusAllowAll() << "\n";
+    Node vlist = gdt.getSygusVarList();
+    Trace("sygus-bg-mem") << "  varList = " << vlist << "\n";
+  }
+
+  Node tr = env.getRewriter()->rewrite(t);
+  Trace("sygus-bg-mem") << "  rewrite(t) = " << tr << "\n";
+
+  bool r0 = isBuiltinTermInSygusGrammar(env, t, stn, allowVars);
+  bool r1 = (tr == t) ? r0 : isBuiltinTermInSygusGrammar(env, tr, stn, allowVars);
+
+  Trace("sygus-bg-mem") << "  isBuiltinTermInSygusGrammar(t)  = " << r0 << "\n";
+  Trace("sygus-bg-mem") << "  isBuiltinTermInSygusGrammar(rt) = " << r1 << "\n";
+
+  bool ret = r1;
+
+  Trace("sygus-bg-mem") << "  ==> returning " << ret << "\n";
+  Trace("sygus-bg-mem") << "====================================================\n";
+  return ret;
+}
+
 
 Node applySygusArgs(const DType& dt,
                     Node op,

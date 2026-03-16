@@ -22,6 +22,7 @@
 #include "theory/quantifiers/sygus/term_database_sygus.h"
 #include "theory/quantifiers/sygus_sampler.h"
 #include "theory/rewriter.h"
+#include "smt/solver_engine.h"
 
 namespace cvc5::internal {
 namespace theory {
@@ -35,35 +36,142 @@ SygusEnumeratorCallback::SygusEnumeratorCallback(Env& env,
 {
 }
 
+
 bool SygusEnumeratorCallback::addTerm(const Node& n,
                                       std::unordered_set<Node>& bterms)
 {
   Node bn = datatypes::utils::sygusToBuiltin(n);
+  Node simp = d_env.getRewriter()->rewrite(bn);
+
   if (d_stats != nullptr)
   {
     ++(d_stats->d_enumTermsRewrite);
   }
-
-  // check whether we should keep the term, which is based on the callback,
-  // and the builtin terms
-  // First, must be unique up to rewriting
+  
+  // Compute cache key early
   Node cval = getCacheValue(n, bn);
+  Node bnRaw = datatypes::utils::sygusToBuiltin(n, /*isExternal=*/true);
+
+
+  // If we've seen it already (either accepted or blocked earlier), stop now
   if (bterms.find(cval) != bterms.end())
   {
-    Trace("sygus-enum-exc") << "Exclude (by rewriting): " << bn << std::endl;
+    Trace("sygus-enum-exc-call") << "Exclude (cached): " << bnRaw << std::endl;
     return false;
   }
-  // insert to builtin term cache, regardless of whether it is redundant
-  // based on the callback
-  bterms.insert(cval);
 
-  // callback-specific add term
-  if (!addTermInternal(n, bn, cval))
+  // Always cache it (even if we are about to block it)
+  
+  
+  // Now do blocking grammar pruning (but after caching)
+  if (!d_blockingGrammarStn.isNull() && simp.getNumChildren() != 0)
+  {
+    bool inbg = datatypes::utils::isBuiltinTermInSygusGrammarDbg(d_env, bnRaw, d_blockingGrammarStn, /*allowVars=*/true);
+    if (inbg)
+    {
+      Trace("sygus-enum-exc-call") << "Exclude (by blocking grammar): " << bnRaw << "\n";
+      bterms.insert(cval);
+      return false;
+    }
+    // else {
+    //   Trace("sygus-enum-exc-call") << "Blocking grammar did not execlude " << bnRaw << "\n";
+    // }
+
+  }
+
+  
+
+  // callback-specific add term (examples, etc.)
+  
+
+  for (const Node& prev : bterms)
+{
+  if (prev.getType() != bn.getType())
+  {
+    continue;
+  }
+NodeManager* nm = nodeManager();
+
+  // Build (not (= bn prev))
+  Node eq = nm->mkNode(Kind::EQUAL, cval, prev);
+  Node query = eq.notNode();
+
+  // ------------------------------------------------------------
+  // Collect free variables manually
+  // ------------------------------------------------------------
+
+  std::vector<Node> vars;
+  std::unordered_set<Node> seen;
+  std::vector<Node> stack;
+
+  stack.push_back(cval);
+  stack.push_back(prev);
+
+  while (!stack.empty())
+  {
+    Node cur = stack.back();
+    stack.pop_back();
+
+    if (cur.isVar())
+    {
+      if (seen.insert(cur).second)
+      {
+        vars.push_back(cur);
+      }
+      continue;
+    }
+
+    for (const Node& c : cur)
+    {
+      stack.push_back(c);
+    }
+  }
+
+  Node closedQuery = query;
+
+  if (!vars.empty())
+  {
+    Node bvl = nm->mkNode(Kind::BOUND_VAR_LIST, vars);
+    closedQuery = nm->mkNode(Kind::EXISTS, bvl, query);
+  }
+
+  // ------------------------------------------------------------
+  // Create subsolver
+  // ------------------------------------------------------------
+
+  std::unique_ptr<SolverEngine> subsolver =
+      std::make_unique<SolverEngine>(nodeManager(), &options());
+
+  subsolver->setLogic(d_env.getLogicInfo());
+
+  subsolver->assertFormula(closedQuery);
+
+  Result r = subsolver->checkSat();
+
+  if (r.getStatus() == Result::UNSAT)
+  {
+    Trace("sygus-enum-exc-call")
+        << "Exclude (by SMT equivalence): "
+        << bnRaw << " == " << prev << std::endl;
+    bterms.insert(cval);
+    return false;
+  }
+}
+
+bterms.insert(cval);
+
+if (!addTermInternal(n, bn, cval))
   {
     return false;
   }
+
+// Only store if it survived SMT equivalence checks
+  d_smtTerms.push_back(bnRaw);
+
+  Trace("sygus-enum-exc-call-inc") << "Included: " << bnRaw << "\n";
   return true;
 }
+
 
 Node SygusEnumeratorCallback::getCacheValue(const Node& n, const Node& bn)
 {
@@ -77,6 +185,7 @@ bool SygusEnumeratorCallback::addTermInternal(const Node& n,
                                               const Node& cval)
 {
   // if we are doing PBE symmetry breaking
+  Node simp = d_env.getRewriter()->rewrite(bn);
   if (d_eec != nullptr)
   {
     if (d_stats != nullptr)
@@ -91,8 +200,8 @@ bool SygusEnumeratorCallback::addTermInternal(const Node& n,
     {
       if (cval != bne)
       {
-        Trace("sygus-enum-exc")
-            << "Exclude (by examples): " << bn << ", since we already have "
+        Trace("sygus-enum-exc-call")
+            << "Exclude (by examples): " << simp << ", since we already have "
             << bne << std::endl;
         return false;
       }

@@ -454,7 +454,15 @@ bool SynthConjecture::doCheck()
         for (unsigned i = 0, size = terms.size(); i < size; i++)
         {
           Node nv = enum_values[i];
-          Node onv = nv.isNull() ? m->getValue(terms[i]) : nv;
+          //Node onv = nv.isNull() ? m->getValue(terms[i]) : nv;
+          if (nv.isNull())
+            {
+              // refuse to use model values; treat as "no candidate produced"
+              modelSuccess = false;
+              continue;
+            }
+            Node onv = nv;
+          //modelSuccess = false;
           TypeNode tn = onv.getType();
           std::stringstream ss;
           TermDbSygus::toStreamSygus(ss, onv);
@@ -761,6 +769,7 @@ bool SynthConjecture::getEnumeratedValues(std::vector<Node>& n,
       {
         Trace("sygus-engine-debug")
             << "Enumerator " << e << " is inactive." << std::endl;
+        activeIncomplete = true;
         continue;
       }
     }

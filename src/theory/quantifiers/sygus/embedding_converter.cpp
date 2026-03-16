@@ -227,6 +227,18 @@ Node EmbeddingConverter::process(Node q,
   {
     Node sf = q[0][i];
     d_synth_fun_vars[sf] = ebvl[i];
+        // Propagate :blocking_grammar from the synth-fun symbol (sf) to its
+    // deep-embedding variable (ev). Enumeration later only sees ev/ee_*.
+    Node ev = ebvl[i];
+    TypeNode bt = SygusUtils::getSygusBlockingType(sf);
+    Trace("sygus-block") << "Embed map: sf=" << sf << " ev=" << ev
+                         << " bt=" << bt << "\n";
+    if (!bt.isNull())
+    {
+      SygusUtils::setSygusBlockingType(ev, bt);
+      Trace("sygus-block") << "Embed map: set blocking type on ev=" << ev
+                                    << "\n";
+    }
     Node sfvl = SygusUtils::getOrMkSygusArgumentList(sf);
     TypeNode tn = ebvl[i].getType();
     // check if there is a template

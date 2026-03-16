@@ -252,6 +252,45 @@ Node SygusUtils::mkSygusTermFor(const Node& f)
   return ret;
 }
 
+struct SygusBlockingTypeAttrId {};
+typedef expr::Attribute<SygusBlockingTypeAttrId, TypeNode> SygusBlockingTypeAttr;
+
+void SygusUtils::setSygusBlockingType(Node n, TypeNode tn)
+{
+  Trace("sygus-bg") << "setSygusBlockingType: node=" << n
+                    << "  nodeKind=" << n.getKind()
+                    << "  type=" << tn
+                    << "  type.isNull=" << tn.isNull()
+                    << "  type.isDatatype=" << (!tn.isNull() && tn.isDatatype())
+                    << std::endl;
+
+  if (!tn.isNull() && tn.isDatatype())
+  {
+    const DType& dt = tn.getDType();
+    Trace("sygus-bg") << "  blocking DT name=" << dt.getName()
+                      << "  isSygus=" << dt.isSygus()
+                      << "  sygusType=" << dt.getSygusType()
+                      << std::endl;
+  }
+
+  n.setAttribute(SygusBlockingTypeAttr(), tn);
+}
+
+
+TypeNode SygusUtils::getSygusBlockingType(Node n)
+{
+  if (n.hasAttribute(SygusBlockingTypeAttr()))
+  {
+    return n.getAttribute(SygusBlockingTypeAttr());
+  }
+  return TypeNode::null();
+}
+
+bool SygusUtils::hasSygusBlockingType(Node n)
+{
+  return n.hasAttribute(SygusBlockingTypeAttr());
+}
+
 }  // namespace quantifiers
 }  // namespace theory
 }  // namespace cvc5::internal

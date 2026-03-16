@@ -425,6 +425,86 @@ RewriteResponse TheoryBoolRewriter::postRewrite(TNode node) {
   return preRewrite(node);
 }
 
+static RewriteResponse absorbChildren(NodeManager* nm,
+                                     TNode n,
+                                     TNode trivialNode,
+                                     TNode skipNode)
+{
+  Kind k = n.getKind();
+  Assert(k == Kind::OR || k == Kind::AND);
+  Kind inner = (k == Kind::OR) ? Kind::AND : Kind::OR;
+
+  // Trace("bool-absorb") << "absorbChildren ENTER: " << n << "\n";
+  // Trace("bool-absorb") << "  outer=" << k << " inner=" << inner << "\n";
+
+  std::unordered_set<TNode> direct;
+  direct.reserve(n.getNumChildren() * 2);
+  for (const TNode& c : n)
+  {
+    direct.insert(c);
+    //Trace("bool-absorb") << "  direct child: " << c << "\n";
+  }
+
+  std::vector<TNode> keep;
+  keep.reserve(n.getNumChildren());
+  bool changed = false;
+
+  for (const TNode& c : n)
+  {
+    bool absorbed = false;
+    if (c.getKind() == inner)
+    {
+      //Trace("bool-absorb") << "  checking inner child: " << c << "\n";
+      for (const TNode& ic : c)
+      {
+       // Trace("bool-absorb") << "    inner grandchild: " << ic;
+        bool hit = (direct.find(ic) != direct.end());
+       // Trace("bool-absorb") << (hit ? "  **HIT (present in direct)**" : "")
+                            // << "\n";
+        if (hit)
+        {
+          absorbed = true;
+          break;
+        }
+      }
+    }
+
+    if (absorbed)
+    {
+      //Trace("bool-absorb") << "  ABSORBING (dropping): " << c << "\n";
+      changed = true;
+      continue;
+    }
+
+    keep.push_back(c);
+  }
+
+  if (!changed)
+  {
+    Trace("bool-absorb") << "absorbChildren NO-CHANGE: " << n << "\n";
+    return RewriteResponse(REWRITE_DONE, n);
+  }
+
+  if (keep.empty())
+  {
+    //Trace("bool-absorb") << "absorbChildren ALL-DROPPED, returning skipNode: "
+                         //<< skipNode << "\n";
+    return RewriteResponse(REWRITE_DONE, skipNode);
+  }
+  if (keep.size() == 1)
+  {
+    //Trace("bool-absorb") << "absorbChildren SINGLE CHILD, returning: " << keep[0]
+                       //  << "\n";
+    return RewriteResponse(REWRITE_AGAIN, keep[0]);
+  }
+
+  Node ret = nm->mkNode(k, keep);
+  Trace("bool-absorb") << "absorbChildren REWRITTEN:\n"
+                       << "  from: " << n << "\n"
+                       << "  to:   " << ret << "\n";
+  return RewriteResponse(REWRITE_AGAIN, ret);
+}
+
 /**
  * flattenNode looks for children of same kind, and if found merges
  * them into the parent.
@@ -563,10 +643,19 @@ RewriteResponse TheoryBoolRewriter::preRewrite(TNode n) {
         if ((*i).getKind() == Kind::OR) done = false;
       }
       if (!done)
-      {
-        return flattenNode(
-            n, /* trivialNode = */ d_true, /* skipNode = */ d_false);
-      }
+        {
+          RewriteResponse rr = flattenNode(n, d_true, d_false);
+          // IMPORTANT: now run absorption on rr.d_node (not on n)
+          if (rr.d_node.getKind() == Kind::OR)
+          {
+            RewriteResponse ar = absorbChildren(nm, rr.d_node, d_true, d_false);
+            // prefer the absorption result if it changed
+            if (ar.d_node != rr.d_node) return ar;
+          }
+          return rr;
+        }
+      RewriteResponse ar = absorbChildren(nm, n, d_true, d_false);
+      if (ar.d_node != n) return ar;
       // x v ... v x --> x
       unsigned ind, size;
       for (ind = 0, size = n.getNumChildren(); ind < size - 1; ++ind)
@@ -576,10 +665,12 @@ RewriteResponse TheoryBoolRewriter::preRewrite(TNode n) {
           break;
         }
       }
+
       if (ind == size - 1)
       {
         return RewriteResponse(REWRITE_AGAIN, n[0]);
       }
+
       break;
     }
     case Kind::AND:
@@ -593,13 +684,28 @@ RewriteResponse TheoryBoolRewriter::preRewrite(TNode n) {
         if ((*i).getKind() == Kind::AND) done = false;
       }
       if (!done)
-      {
-        RewriteResponse ret = flattenNode(
-            n, /* trivialNode = */ d_false, /* skipNode = */ d_true);
-        Trace("bool-flad_trueen") << n << ": " << ret.d_node << std::endl;
-        return ret;
-      }
-      // x ^ ... ^ x --> x
+        {
+           RewriteResponse rr = flattenNode(n, d_false, d_true);
+          // IMPORTANT: now run absorption on rr.d_node (not on n)
+          if (rr.d_node.getKind() == Kind::AND)
+          {
+            RewriteResponse ar = absorbChildren(nm, rr.d_node, d_false, d_true);
+            // prefer the absorption result if it changed
+            if (ar.d_node != rr.d_node) return ar;
+          }
+          return rr;
+        }
+      // if (!done)
+      // {
+        
+      //   RewriteResponse ret = flattenNode(
+      //       n, /* trivialNode = */ d_false, /* skipNode = */ d_true);
+      //   Trace("bool-flad_trueen") << n << ": " << ret.d_node << std::endl;
+      //   return ret;
+      // }
+      RewriteResponse ar = absorbChildren(nm, n, d_false, d_true);
+      if (ar.d_node != n) return ar;
+      // // x ^ ... ^ x --> x
       unsigned ind, size;
       for (ind = 0, size = n.getNumChildren(); ind < size - 1; ++ind)
       {
@@ -612,6 +718,7 @@ RewriteResponse TheoryBoolRewriter::preRewrite(TNode n) {
       {
         return RewriteResponse(REWRITE_AGAIN, n[0]);
       }
+     
       break;
     }
     case Kind::IMPLIES:

@@ -31,6 +31,8 @@
 #include "theory/quantifiers/quantifiers_state.h"
 #include "theory/quantifiers/term_util.h"
 #include "theory/rewriter.h"
+#include "theory/quantifiers/sygus/sygus_utils.h"
+
 
 using namespace cvc5::internal::kind;
 
@@ -339,6 +341,32 @@ void TermDbSygus::registerEnumerator(Node e,
   registerSygusType(et);
   d_enum_to_conjecture[e] = conj;
   d_enum_to_synth_fun[e] = f;
+  TypeNode blk = SygusUtils::getSygusBlockingType(f);
+
+    if (blk.isNull() && f.getKind() == Kind::SKOLEM)
+  {
+    // Try to read its indices; for non-internal skolems this should be empty.
+    std::vector<Node> ski = f.getSkolemIndices();
+    Trace("sygus-block") << "registerEnumerator: f=" << f
+                        << " skolemId=" << f.getSkolemId()
+                        << " indices.size()=" << ski.size() << "\n";
+
+    if (ski.size() == 2)
+    {
+      Node sf = ski[1];  // original synth-fun symbol (common convention here)
+      blk = SygusUtils::getSygusBlockingType(sf);
+      Trace("sygus-block") << "registerEnumerator: fallback sf=" << sf
+                          << " blk=" << blk << "\n";
+    }
+  }
+
+  if (!blk.isNull())
+  {
+    Trace("sygus-block") << "Copy blocking type to enumerator " << e
+                        << " : " << blk << "\n";
+    registerSygusType(blk);
+    SygusUtils::setSygusBlockingType(e, blk);
+  }
   NodeManager* nm = nodeManager();
 
   Trace("sygus-db") << "  registering symmetry breaking clauses..."
@@ -613,12 +641,13 @@ bool TermDbSygus::isBasicEnumerator(Node e) const
 
 bool TermDbSygus::isPassiveEnumerator(Node e) const
 {
-  std::map<Node, bool>::const_iterator itus = d_enum_active_gen.find(e);
-  if (itus != d_enum_active_gen.end())
-  {
-    return !itus->second;
-  }
-  return true;
+  return false;
+  // std::map<Node, bool>::const_iterator itus = d_enum_active_gen.find(e);
+  // if (itus != d_enum_active_gen.end())
+  // {
+  //   return !itus->second;
+  // }
+  // return true;
 }
 
 void TermDbSygus::getEnumerators(std::vector<Node>& mts)

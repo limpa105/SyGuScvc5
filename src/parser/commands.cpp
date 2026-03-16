@@ -488,8 +488,10 @@ void DeclareSygusVarCommand::toStream(std::ostream& out) const
 SynthFunCommand::SynthFunCommand(const std::string& id,
                                  const std::vector<cvc5::Term>& vars,
                                  cvc5::Sort sort,
-                                 cvc5::Grammar* g)
-    : DeclarationDefinitionCommand(id), d_vars(vars), d_sort(sort), d_grammar(g)
+                                 cvc5::Grammar* g,
+                                cvc5::Grammar* blockingGrammar)
+    : DeclarationDefinitionCommand(id), d_vars(vars), d_sort(sort), d_grammar(g), 
+    d_blockingGrammar(blockingGrammar)
 {
 }
 
@@ -502,10 +504,29 @@ cvc5::Sort SynthFunCommand::getSort() const { return d_sort; }
 
 const cvc5::Grammar* SynthFunCommand::getGrammar() const { return d_grammar; }
 
+bool SynthFunCommand::hasBlockingGrammar() const
+{
+  return d_blockingGrammar != nullptr;
+}
+
+cvc5::Grammar* SynthFunCommand::getBlockingGrammar() const
+{
+  return d_blockingGrammar;
+}
+
 void SynthFunCommand::invoke(cvc5::Solver* solver, SymManager* sm)
 {
   Term fun;
-  if (d_grammar != nullptr)
+  if (d_blockingGrammar != nullptr)
+  {
+    if (d_grammar == nullptr)
+    {
+      // either disallow or synthFun(name, vars, sort) must also accept bg
+      // but most likely you require a main grammar if you give a blocking one
+    }
+    fun = solver->synthFun(d_symbol, d_vars, d_sort, *d_grammar, *d_blockingGrammar);
+  }
+  else if (d_grammar != nullptr)
   {
     fun = solver->synthFun(d_symbol, d_vars, d_sort, *d_grammar);
   }

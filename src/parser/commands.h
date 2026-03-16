@@ -518,13 +518,17 @@ class CVC5_EXPORT SynthFunCommand : public DeclarationDefinitionCommand
   SynthFunCommand(const std::string& id,
                   const std::vector<cvc5::Term>& vars,
                   cvc5::Sort sort,
-                  cvc5::Grammar* g);
+                  cvc5::Grammar* g,
+                  cvc5::Grammar* blockingGrammar = nullptr);
   /** returns the input variables of the function-to-synthesize */
   const std::vector<cvc5::Term>& getVars() const;
   /** returns the sygus sort of the function-to-synthesize */
   cvc5::Sort getSort() const;
   /** Get the sygus grammar given for the synth fun command */
   const cvc5::Grammar* getGrammar() const;
+
+  bool hasBlockingGrammar() const;
+  cvc5::Grammar* getBlockingGrammar() const;
 
   /** invokes this command
    *
@@ -544,6 +548,10 @@ class CVC5_EXPORT SynthFunCommand : public DeclarationDefinitionCommand
   cvc5::Sort d_sort;
   /** optional grammar for the possible values of the function-to-sytnhesize */
   cvc5::Grammar* d_grammar;
+
+  cvc5::Grammar* d_blockingGrammar;
+
+
 };
 
 /** Declares a sygus constraint */
