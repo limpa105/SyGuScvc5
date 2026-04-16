@@ -67,6 +67,8 @@ class EnumValueManager : protected EnvObj
   /** Get the example evaluation cache */
   ExampleEvalCache* getExampleEvalCache();
 
+  void updateBlockingGrammarTypes(TypeNode blk, TypeNode blg);
+
  private:
   /**
    * Get model value for term n.

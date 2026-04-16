@@ -92,11 +92,18 @@ void SygusSolver::declareSynthFun(Node fn,
 
   // sygus conjecture is now stale
   d_sygusConjectureStale = true;
+
+  QuantifiersEngine* qe = d_smtSolver.getQuantifiersEngine();
+  if (qe != nullptr)
+  {
+    qe->setSygusSolver(this);
+  }
 }
 
 void SygusSolver::declareSynthFun(Node fn,
                                  TypeNode sygusType,
                                  TypeNode blockingSygusType,
+                                 TypeNode blockingGeneratorSygusType,
                                  bool isInv,
                                  const std::vector<Node>& vars)
 {
@@ -123,6 +130,15 @@ void SygusSolver::declareSynthFun(Node fn,
   {
     quantifiers::SygusUtils::setSygusBlockingType(fn, blockingSygusType);
     checkDefinitionsSygusDt(fn, blockingSygusType);
+    initializeBlockingGrammar(fn, blockingSygusType);
+  }
+
+  if (!blockingGeneratorSygusType.isNull() && blockingGeneratorSygusType.isDatatype()
+      && blockingGeneratorSygusType.getDType().isSygus())
+  {
+    quantifiers::SygusUtils::setSygusBlockingGeneratorType(fn, blockingGeneratorSygusType);
+    Trace("parser-sygus") << "Parsed blocking grammar generator in declareSynthFun!!" << blockingGeneratorSygusType << "\n";
+    checkDefinitionsSygusDt(fn, blockingGeneratorSygusType);
   }
 
   d_sygusConjectureStale = true;
@@ -247,6 +263,193 @@ void SygusSolver::assertSygusInvConstraint(Node inv,
   d_sygusConjectureStale = true;
 }
 
+void SygusSolver::initializeBlockingGrammar(Node fn, TypeNode blockingSygusType)
+{
+  Assert(!blockingSygusType.isNull());
+  Assert(blockingSygusType.isSygusDatatype());
+
+  Node bvl = quantifiers::SygusUtils::getOrMkSygusArgumentList(fn);
+  std::vector<Node> sygusVars;
+  if (!bvl.isNull())
+  {
+    sygusVars.insert(sygusVars.end(), bvl.begin(), bvl.end());
+  }
+
+  d_blockingGrammars.erase(fn);
+  d_blockingTopNts.erase(fn);
+
+  auto res = d_blockingGrammars.emplace(
+      std::piecewise_construct,
+      std::forward_as_tuple(fn),
+      std::forward_as_tuple(sygusVars, blockingSygusType));
+
+  const std::vector<Node>& nts = res.first->second.getNtSyms();
+  Assert(!nts.empty());
+  d_blockingTopNts.emplace(fn, nts[0]);
+}
+
+bool SygusSolver::noteFailedSynthSolution(const std::map<Node, Node>& solMap)
+{
+  bool changed = false;
+  for (const auto& sv : solMap)
+  {
+    Node fn = sv.first;
+    Node rule = sv.second;
+
+    auto itg = d_blockingGrammars.find(fn);
+    if (itg == d_blockingGrammars.end())
+    {
+      Trace("failed-debug")
+          << "[SyGuS] No mutable blocking grammar stored for " << fn << "\n";
+      continue;
+    }
+
+    auto itt = d_blockingTopNts.find(fn);
+    Assert(itt != d_blockingTopNts.end());
+    Node topNt = itt->second;
+
+    if (rule.getKind() == Kind::LAMBDA)
+    {
+      rule = rule[1];
+    }
+
+    if (!rule.getType().isInstanceOf(topNt.getType()))
+    {
+      Trace("failed-debug")
+          << "[SyGuS] Skip failed solution for " << fn
+          << " because rule has wrong type: " << rule
+          << " : " << rule.getType()
+          << ", expected instance of " << topNt.getType() << "\n";
+      continue;
+    }
+
+    const std::vector<Node>& beforeRules = itg->second.getRulesFor(topNt);
+    size_t beforeSize = beforeRules.size();
+    bool alreadyPresent =
+        std::find(beforeRules.begin(), beforeRules.end(), rule) != beforeRules.end();
+
+    Trace("failed-debug")
+        << "[SyGuS] About to add failed solution to top-level blocking grammar for "
+        << fn << ": " << rule << "\n";
+    // Trace("failed-debug")
+    //     << "[SyGuS] Rule count before add: " << beforeSize
+    //     << ", already present = " << alreadyPresent << "\n";
+
+    itg->second.addRule(topNt, rule);
+
+    const std::vector<Node>& afterRules = itg->second.getRulesFor(topNt);
+    size_t afterSize = afterRules.size();
+    bool nowPresent =
+        std::find(afterRules.begin(), afterRules.end(), rule) != afterRules.end();
+
+    // Trace("failed-debug")
+    //     << "[SyGuS] Rule count after add: " << afterSize
+    //     << ", now present = " << nowPresent << "\n";
+
+    if (afterSize != beforeSize)
+    {
+      changed = true;
+
+      // Immediately re-resolve the updated blocking grammar and attach it.
+      SygusGrammar gcopy = itg->second;
+      // Trace("failed-debug")
+      //     << "[SyGuS] Re-resolving updated blocking grammar for " << fn << "\n";
+      // Trace("failed-debug")
+      //     << "[SyGuS] Unresolved grammar before resolve:\n"
+      //     << gcopy.toString() << "\n";
+
+      TypeNode bt = gcopy.resolve(false);
+      quantifiers::SygusUtils::setSygusBlockingType(fn, bt);
+      TypeNode bgg = quantifiers::SygusUtils::getSygusBlockingGeneratorType(fn);
+      
+      QuantifiersEngine* qe = nullptr;
+      if (usingSygusSubsolver() && d_subsolver)
+      {
+        d_subsolver->updateBlockingTypeForSynthFun(fn, bt, bgg);
+      }
+      else
+      {
+        QuantifiersEngine* qe = d_smtSolver.getQuantifiersEngine();
+        if (qe != nullptr)
+        {
+          qe->updateBlockingTypeForSynthFun(fn, bt, bgg);
+        }
+      }
+  }
+  }
+  return changed;
+
+}
+
+void SygusSolver::refreshBlockingGrammarTypes()
+{
+  for (const auto& bg : d_blockingGrammars)
+  {
+    Node fn = bg.first;
+    SygusGrammar gcopy = bg.second;
+    TypeNode bt = gcopy.resolve(false);
+    quantifiers::SygusUtils::setSygusBlockingType(fn, bt);
+    Trace("failed-debug")
+        << "[SyGuS] Refreshed blocking grammar type for "
+        << fn << " to " << bt << "\n";
+  }
+}
+
+
+void SygusSolver::consumeNewFailedSynthSolutions()
+{
+  std::map<Node, std::vector<std::map<Node, Node>>> failedSolMap;
+  if (!getFailedSynthSolutions(failedSolMap))
+  {
+    return;
+  }
+
+  size_t curIndex = 0;
+  for (const auto& cs : failedSolMap)
+  {
+    const std::vector<std::map<Node, Node>>& failed = cs.second;
+    for (const auto& sol : failed)
+    {
+      if (curIndex >= d_numProcessedFailedSols)
+      {
+        noteFailedSynthSolution(sol);
+      }
+      curIndex++;
+    }
+  }
+  d_numProcessedFailedSols = curIndex;
+}
+
+void SygusSolver::debugPrintNewFailedSynthSolutions()
+{
+  consumeNewFailedSynthSolutions();
+  // std::map<Node, std::vector<std::map<Node, Node>>> failedSolMap;
+  // if (!getFailedSynthSolutions(failedSolMap))
+  // {
+  //   return;
+  // }
+
+  // size_t curIndex = 0;
+  // for (const auto& cs : failedSolMap)
+  // {
+  //   const std::vector<std::map<Node, Node>>& failed = cs.second;
+  //   for (const auto& sol : failed)
+  //   {
+  //     if (curIndex >= d_numPrintedFailedSols)
+  //     {
+  //       Trace("failed-debug") << "[SyGuS] New failed solution:\n";
+  //       for (const auto& sv : sol)
+  //       {
+  //         Trace("failed-debug") << "  " << sv.first << " -> "
+  //                            << sv.second << "\n";
+  //       }
+  //     }
+  //     curIndex++;
+  //   }
+  // }
+  // d_numPrintedFailedSols = curIndex;
+}
+
 SynthResult SygusSolver::checkSynth(bool isNext)
 {
   Trace("smt-help") << "SygusSolver::checkSynth" << std::endl;
@@ -274,6 +477,7 @@ SynthResult SygusSolver::checkSynth(bool isNext)
   }
   if (d_sygusConjectureStale)
   {
+    refreshBlockingGrammarTypes();
     NodeManager* nm = nodeManager();
     // build synthesis conjecture from asserted constraints and declared
     // variables/functions
@@ -518,7 +722,7 @@ std::vector<Node> callArgs;
       body = quantifiers::SygusUtils::mkSygusConjecture(
           nodeManager(), ntrivSynthFuns, body);
     }
-    Trace("smt-debug") << "...constructed forall " << body << std::endl;
+    Trace("smt-debug-final") << "...constructed forall " << body << std::endl;
 
     Trace("smt") << "Check synthesis conjecture: " << body << std::endl;
 
@@ -645,6 +849,9 @@ if (!d_prevSolutions.empty() && d_callArgs.empty() && !d_sygusFunSymbols.empty()
     r = sdsc.checkSat(query);
   }
   Trace("smt-sygus") << "...got " << r << std::endl;
+  debugPrintNewFailedSynthSolutions();
+
+
   // The result returned by the above call is typically "unknown", which may
   // or may not correspond to a state in which we solved the conjecture
   // successfully. Instead we call getSynthSolutions below. If this returns
@@ -684,6 +891,7 @@ while (true)
     sol_map.clear();
 
     // Try to get a solution
+    debugPrintNewFailedSynthSolutions();
     if (!getSynthSolutions(sol_map))
     {
         // No candidate solution found by getSynthSolutions
@@ -874,16 +1082,21 @@ Result nr = noveltyCheck->checkSat();
         // ✅ NEW SOLUTION FOUND!
         Trace("novelty") << "we got sat??..\n";
         d_prevSolutions.push_back(newSol);
+        std::map<Node, Node> acceptedOnly;
+        acceptedOnly[sol_map.begin()->first] = newSol;
+        noteFailedSynthSolution(acceptedOnly);
+        debugPrintNewFailedSynthSolutions();
         foundNovel = true;
         break;
     }
     else
     {
         // ❌ Duplicate solution → get a new candidate
-        Trace("novelty") << "[SyGuS] Duplicate solution, resynthesizing...\n";
+        Trace("novelty") << newApplied << "not novel\n";
 
         // Ask for another solution from the SyGuS subsolver
         r = d_subsolver->checkSat();
+        debugPrintNewFailedSynthSolutions();
         continue; // loop again, getSynthSolutions() will get the new candidate
     }
 }
@@ -954,6 +1167,49 @@ bool SygusSolver::getSubsolverSynthSolutions(std::map<Node, Node>& solMap)
   }
   return true;
 }
+
+
+bool SygusSolver::getFailedSynthSolutions(
+    std::map<Node, std::vector<std::map<Node, Node>>>& solMap)
+{
+  bool ret = false;
+  Trace("smt") << "SygusSolver::getFailedSynthSolutions" << std::endl;
+  if (usingSygusSubsolver())
+  {
+    // use the call to get the failed synth solutions from the subsolver
+    if (d_subsolver)
+    {
+      ret = d_subsolver->getSubsolverFailedSynthSolutions(solMap);
+    }
+  }
+  else
+  {
+    ret = getSubsolverFailedSynthSolutions(solMap);
+  }
+  return ret;
+}
+
+bool SygusSolver::getSubsolverFailedSynthSolutions(
+    std::map<Node, std::vector<std::map<Node, Node>>>& solMap)
+{
+  Trace("smt") << "SygusSolver::getSubsolverFailedSynthSolutions"
+               << std::endl;
+  std::map<Node, std::vector<std::map<Node, Node>>> solMapn;
+  QuantifiersEngine* qe = d_smtSolver.getQuantifiersEngine();
+  if (qe == nullptr || !qe->getFailedSolutions(solMapn))
+  {
+    return false;
+  }
+
+  for (std::pair<const Node, std::vector<std::map<Node, Node>>>& cs : solMapn)
+  {
+    std::vector<std::map<Node, Node>>& dst = solMap[cs.first];
+    dst.insert(dst.end(), cs.second.begin(), cs.second.end());
+  }
+  return true;
+}
+
+
 
 bool SygusSolver::canTrustSynthesisResult(const Options& opts)
 {

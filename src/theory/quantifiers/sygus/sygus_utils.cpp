@@ -255,6 +255,9 @@ Node SygusUtils::mkSygusTermFor(const Node& f)
 struct SygusBlockingTypeAttrId {};
 typedef expr::Attribute<SygusBlockingTypeAttrId, TypeNode> SygusBlockingTypeAttr;
 
+struct SygusBlockingGeneratorTypeAttrId {};
+typedef expr::Attribute<SygusBlockingGeneratorTypeAttrId, TypeNode> SygusBlockingGeneratorTypeAttr;
+
 void SygusUtils::setSygusBlockingType(Node n, TypeNode tn)
 {
   Trace("sygus-bg") << "setSygusBlockingType: node=" << n
@@ -277,6 +280,27 @@ void SygusUtils::setSygusBlockingType(Node n, TypeNode tn)
 }
 
 
+void SygusUtils::setSygusBlockingGeneratorType(Node n, TypeNode tn)
+{
+  Trace("sygus-bg") << "setSygusBlockingGeneratorType: node=" << n
+                    << "  nodeKind=" << n.getKind()
+                    << "  type=" << tn
+                    << "  type.isNull=" << tn.isNull()
+                    << "  type.isDatatype=" << (!tn.isNull() && tn.isDatatype())
+                    << std::endl;
+
+  if (!tn.isNull() && tn.isDatatype())
+  {
+    const DType& dt = tn.getDType();
+    Trace("sygus-bg") << "  blocking DT name=" << dt.getName()
+                      << "  isSygus=" << dt.isSygus()
+                      << "  sygusType=" << dt.getSygusType()
+                      << std::endl;
+  }
+
+  n.setAttribute(SygusBlockingGeneratorTypeAttr(), tn);
+}
+
 TypeNode SygusUtils::getSygusBlockingType(Node n)
 {
   if (n.hasAttribute(SygusBlockingTypeAttr()))
@@ -286,9 +310,18 @@ TypeNode SygusUtils::getSygusBlockingType(Node n)
   return TypeNode::null();
 }
 
-bool SygusUtils::hasSygusBlockingType(Node n)
+TypeNode SygusUtils::getSygusBlockingGeneratorType(Node n)
 {
-  return n.hasAttribute(SygusBlockingTypeAttr());
+  if (n.hasAttribute(SygusBlockingGeneratorTypeAttr()))
+  {
+    return n.getAttribute(SygusBlockingGeneratorTypeAttr());
+  }
+  return TypeNode::null();
+}
+
+bool SygusUtils::hasSygusBlockingGeneratorType(Node n)
+{
+  return n.hasAttribute(SygusBlockingGeneratorTypeAttr());
 }
 
 }  // namespace quantifiers

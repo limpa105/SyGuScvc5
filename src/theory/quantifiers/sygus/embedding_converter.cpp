@@ -231,12 +231,20 @@ Node EmbeddingConverter::process(Node q,
     // deep-embedding variable (ev). Enumeration later only sees ev/ee_*.
     Node ev = ebvl[i];
     TypeNode bt = SygusUtils::getSygusBlockingType(sf);
+    TypeNode bgg = SygusUtils::getSygusBlockingGeneratorType(sf);
+
     Trace("sygus-block") << "Embed map: sf=" << sf << " ev=" << ev
                          << " bt=" << bt << "\n";
     if (!bt.isNull())
     {
       SygusUtils::setSygusBlockingType(ev, bt);
       Trace("sygus-block") << "Embed map: set blocking type on ev=" << ev
+                                    << "\n";
+    }
+    if (!bgg.isNull())
+    {
+      SygusUtils::setSygusBlockingGeneratorType(ev, bgg);
+      Trace("sygus-block") << "Embed map: set blocking generator type on ev=" << ev
                                     << "\n";
     }
     Node sfvl = SygusUtils::getOrMkSygusArgumentList(sf);

@@ -76,6 +76,9 @@ class TermDbSygus : protected EnvObj
    * This method returns true if tn is a sygus datatype type and false
    * otherwise.
    */
+
+  void updateBlockingTypeForSynthFun(Node sf, TypeNode bt);
+  
   bool registerSygusType(TypeNode tn);
 
   //------------------------------utilities

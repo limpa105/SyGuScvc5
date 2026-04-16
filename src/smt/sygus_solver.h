@@ -25,6 +25,7 @@
 #include "smt/assertions.h"
 #include "smt/env_obj.h"
 #include "util/synth_result.h"
+#include "expr/sygus_grammar.h"
 
 namespace cvc5::internal {
 
@@ -64,6 +65,18 @@ class SygusSolver : protected EnvObj
   SygusSolver(Env& env, SmtSolver& sms);
   ~SygusSolver();
 
+
+
+  void initializeBlockingGrammar(Node fn, TypeNode blockingSygusType);
+  bool noteFailedSynthSolution(const std::map<Node, Node>& solMap);
+  void consumeNewFailedSynthSolutions();
+  void refreshBlockingGrammarTypes();
+
+  std::unordered_map<Node, SygusGrammar> d_blockingGrammars;
+  std::unordered_map<Node, Node> d_blockingTopNts;
+  size_t d_numProcessedFailedSols = 0;
+
+
   /**
    * Add variable declaration.
    *
@@ -102,6 +115,7 @@ class SygusSolver : protected EnvObj
   void declareSynthFun(Node func,
                      TypeNode sygusType,
                      TypeNode blockingSygusType,
+                     TypeNode blockingGeneratorSygusType,
                      bool isInv,
                      const std::vector<Node>& vars);
 
@@ -163,6 +177,9 @@ class SygusSolver : protected EnvObj
    * is a valid formula.
    */
   bool getSynthSolutions(std::map<Node, Node>& sol_map);
+
+  void debugPrintNewFailedSynthSolutions();
+  size_t d_numPrintedFailedSols = 0;
   /**
    * Same as above, but used for getting synthesis solutions from a "subsolver"
    * that has been initialized to assert the synthesis conjecture as a
@@ -173,6 +190,13 @@ class SygusSolver : protected EnvObj
    * synthesis conjecture.
    */
   bool getSubsolverSynthSolutions(std::map<Node, Node>& solMap);
+
+
+  bool getFailedSynthSolutions(
+    std::map<Node, std::vector<std::map<Node, Node>>>& solMap);
+
+  bool getSubsolverFailedSynthSolutions(
+      std::map<Node, std::vector<std::map<Node, Node>>>& solMap);
 
   /**
    * Returns true if we can trust the results of synthesis solutions for

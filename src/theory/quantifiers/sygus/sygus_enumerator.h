@@ -93,6 +93,9 @@ class SygusEnumerator : public EnumValGenerator
   /** Are we enumerating shapes? */
   bool isEnumShapes() const;
 
+  void updateBlockingGrammarTypes(TypeNode blk, TypeNode blg) override;
+
+
  private:
 
 
@@ -194,6 +197,7 @@ class SygusEnumerator : public EnumValGenerator
 
     unsigned getMaxAcceptedSize() const { return d_maxAcceptedSize; }
 
+
    private:
     /** reference to the statistics of parent */
     SygusStatistics* d_stats;
@@ -228,6 +232,8 @@ class SygusEnumerator : public EnumValGenerator
     std::map<unsigned, std::vector<unsigned>> d_cToCIndices;
     //-------------------------end static information about type
 
+    
+    
     /** the list of sygus terms we have enumerated */
     std::vector<Node> d_terms;
     /** the set of builtin terms corresponding to the above list */

@@ -935,7 +935,7 @@ void SolverEngine::assertFormulaInternal(const Node& formula)
 {
   // as an optimization we do not check whether formula is well-formed here, and
   // defer this check for certain cases within the assertions module.
-  Trace("smt") << "SolverEngine::assertFormula(" << formula << ")" << endl;
+  //Trace("smt-debug-final") << "SolverEngine::assertFormula(" << formula << ")" << endl;
   d_smtSolver->getAssertions().assertFormula(formula);
 }
 
@@ -954,10 +954,11 @@ void SolverEngine::declareSygusVar(Node var)
 void SolverEngine::declareSynthFun(Node func,
                                    TypeNode sygusType,
                                    TypeNode blockingSygusType,
+                                   TypeNode blockingGeneratorSygusType,
                                    bool isInv,
                                    const std::vector<Node>& vars)
 {
-  d_sygusSolver->declareSynthFun(func, sygusType, blockingSygusType, isInv, vars);
+  d_sygusSolver->declareSynthFun(func, sygusType, blockingSygusType,  blockingGeneratorSygusType, isInv, vars);
 }
 
 void SolverEngine::declareSynthFun(Node func,
@@ -1967,6 +1968,18 @@ void SolverEngine::printInstantiations(std::ostream& out)
   }
 }
 
+
+void SolverEngine::updateBlockingTypeForSynthFun(Node sf,
+                                                 TypeNode bt,
+                                                 TypeNode bgg)
+{
+  QuantifiersEngine* qe = d_smtSolver->getQuantifiersEngine();
+  if (qe != nullptr)
+  {
+    qe->updateBlockingTypeForSynthFun(sf, bt, bgg);
+  }
+}
+
 void SolverEngine::getInstantiationTermVectors(
     std::map<Node, std::vector<std::vector<Node>>>& insts)
 {
@@ -1988,6 +2001,30 @@ bool SolverEngine::getSynthSolutions(std::map<Node, Node>& solMap)
   // when none is available.
   return ret && !solMap.empty();
 }
+
+  bool SolverEngine::getFailedSynthSolutions(
+      std::map<Node, std::vector<std::map<Node, Node>>>& solMap)
+  {
+    if (d_sygusSolver == nullptr)
+    {
+      throw RecoverableModalException(
+          "Cannot get failed synth solutions in this context.");
+    }
+    bool ret = d_sygusSolver->getFailedSynthSolutions(solMap);
+    return ret && !solMap.empty();
+  }
+
+  bool SolverEngine::getSubsolverFailedSynthSolutions(
+      std::map<Node, std::vector<std::map<Node, Node>>>& solMap)
+  {
+    if (d_sygusSolver == nullptr)
+    {
+      throw RecoverableModalException(
+          "Cannot get failed synth solutions in this context.");
+    }
+    return d_sygusSolver->getSubsolverFailedSynthSolutions(solMap);
+  }
+
 
 bool SolverEngine::getSubsolverSynthSolutions(std::map<Node, Node>& solMap)
 {

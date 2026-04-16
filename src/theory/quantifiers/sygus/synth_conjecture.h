@@ -44,6 +44,7 @@ class EmbeddingConverter;
 class SygusPbe;
 class SygusStatistics;
 class EnumValueManager;
+class SynthEngine;
 
 /** a synthesis conjecture
  * This class implements approaches for a synthesis conjecture, given by data
@@ -60,7 +61,8 @@ class SynthConjecture : protected EnvObj
                   QuantifiersInferenceManager& qim,
                   QuantifiersRegistry& qr,
                   TermRegistry& tr,
-                  SygusStatistics& s);
+                  SygusStatistics& s,
+                  SynthEngine* parent);
   ~SynthConjecture();
   /**
    * Presolve, called once at the beginning of every check-sat.
@@ -73,6 +75,8 @@ class SynthConjecture : protected EnvObj
   //-------------------------------for counterexample-guided check/refine
   /** whether the conjecture is waiting for a call to doCheck below */
   bool needsCheck();
+
+  SynthEngine* d_parent;
   /** do syntax-guided enumerative check
    *
    * This is step 2(a) of Figure 3 of Reynolds et al CAV 2015.
@@ -101,6 +105,12 @@ class SynthConjecture : protected EnvObj
    *   f -> (lambda x. x+1)
    */
   bool getSynthSolutions(std::map<Node, std::map<Node, Node> >& sol_map);
+
+  void updateBlockingTypeForSynthFun(Node sf, TypeNode bt, TypeNode bgg);
+
+  
+  bool getFailedSolutions(
+      std::map<Node, std::vector<std::map<Node, Node>>>& sol_map);
   /** is ground */
   bool isGround() const { return d_innerVars.empty(); }
   /** are we using single invocation techniques */
@@ -198,6 +208,9 @@ class SynthConjecture : protected EnvObj
    * if d_computedSolution is true.
    */
   std::vector<Node> d_sol;
+
+  std::vector<std::vector<Node>> d_failedSolutions;
+
   std::vector<int8_t> d_solStatus;
   /**
    * (SyGuS datatype) values for solutions, which is populated if we have a
@@ -323,6 +336,10 @@ class SynthConjecture : protected EnvObj
    */
   bool getSynthSolutionsInternal(std::vector<Node>& sols,
                                  std::vector<int8_t>& status);
+
+
+  bool getFailedSolutionsInternal(std::vector<std::vector<Node>>& badSols);
+
   /**
    * Run expression mining on the last synthesis solution. Return true
    * if we should skip it.

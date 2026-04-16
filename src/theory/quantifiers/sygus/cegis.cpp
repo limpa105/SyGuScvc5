@@ -185,7 +185,7 @@ void Cegis::getTermList(const std::vector<Node>& candidates,
 bool Cegis::addEvalLemmas(const std::vector<Node>& candidates,
                           const std::vector<Node>& candidate_values)
 {
-  return false;
+  //return false;
   // First, decide if this call will apply "conjecture-specific refinement".
   // In other words, in some settings, the following method will identify and
   // block a class of solutions {candidates -> S} that generalizes the current

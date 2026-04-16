@@ -704,6 +704,20 @@ bool QuantifiersEngine::getSynthSolutions(
 {
   return d_qmodules->d_synth_e->getSynthSolutions(sol_map);
 }
+
+void QuantifiersEngine::updateBlockingTypeForSynthFun(Node sf,
+                                                      TypeNode bt,
+                                                      TypeNode bgg)
+{
+  d_qmodules->d_synth_e->updateBlockingTypeForSynthFun(sf, bt, bgg);
+}
+
+bool QuantifiersEngine::getFailedSolutions(
+    std::map<Node, std::vector<std::map<Node, Node>>>& sol_map)
+{
+  return d_qmodules->d_synth_e->getFailedSolutions(sol_map);
+}
+
 void QuantifiersEngine::declarePool(Node p, const std::vector<Node>& initValue)
 {
   d_treg.declarePool(p, initValue);

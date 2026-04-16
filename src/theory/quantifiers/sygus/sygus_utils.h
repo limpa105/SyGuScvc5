@@ -127,8 +127,13 @@ class SygusUtils
 
 
   static void setSygusBlockingType(Node n, TypeNode tn);
+
+  static void setSygusBlockingGeneratorType(Node n, TypeNode tn);
   static TypeNode getSygusBlockingType(Node n);
   static bool hasSygusBlockingType(Node n);
+
+   static TypeNode getSygusBlockingGeneratorType(Node n);
+  static bool hasSygusBlockingGeneratorType(Node n);
 };
 
 }  // namespace quantifiers

@@ -144,6 +144,12 @@ class QuantifiersEngine : protected EnvObj
    * For details on what is added to sol_map, see
    * SynthConjecture::getSynthSolutions.
    */
+   
+  bool getFailedSolutions(
+    std::map<Node, std::vector<std::map<Node, Node>>>& sol_map);
+
+  void updateBlockingTypeForSynthFun(Node sf, TypeNode bt, TypeNode bgg);
+  
   bool getSynthSolutions(std::map<Node, std::map<Node, Node> >& sol_map);
   /** Declare pool */
   void declarePool(Node p, const std::vector<Node>& initValue);

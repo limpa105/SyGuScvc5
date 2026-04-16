@@ -489,10 +489,18 @@ SynthFunCommand::SynthFunCommand(const std::string& id,
                                  const std::vector<cvc5::Term>& vars,
                                  cvc5::Sort sort,
                                  cvc5::Grammar* g,
-                                cvc5::Grammar* blockingGrammar)
+                                 cvc5::Grammar* blockingGrammar,
+                                 cvc5::Grammar* blockingGrammarGenerator)
     : DeclarationDefinitionCommand(id), d_vars(vars), d_sort(sort), d_grammar(g), 
-    d_blockingGrammar(blockingGrammar)
+    d_blockingGrammar(blockingGrammar),
+    d_blockingGrammarGenerator(blockingGrammarGenerator)
 {
+  if (blockingGrammarGenerator) {
+    Trace("parser-sygus") << "Parsed blocking grammar generator in commands!!" << blockingGrammarGenerator << "\n";
+  } else {
+    Trace("parser-sygus") << "Did not parsed blocking grammar generator \n";
+
+  }
 }
 
 const std::vector<cvc5::Term>& SynthFunCommand::getVars() const
@@ -514,6 +522,17 @@ cvc5::Grammar* SynthFunCommand::getBlockingGrammar() const
   return d_blockingGrammar;
 }
 
+
+bool SynthFunCommand::hasBlockingGrammarGenerator() const
+{
+  return d_blockingGrammarGenerator != nullptr;
+}
+
+cvc5::Grammar* SynthFunCommand::getBlockingGrammarGenerator() const
+{
+  return d_blockingGrammarGenerator;
+}
+
 void SynthFunCommand::invoke(cvc5::Solver* solver, SymManager* sm)
 {
   Term fun;
@@ -524,7 +543,7 @@ void SynthFunCommand::invoke(cvc5::Solver* solver, SymManager* sm)
       // either disallow or synthFun(name, vars, sort) must also accept bg
       // but most likely you require a main grammar if you give a blocking one
     }
-    fun = solver->synthFun(d_symbol, d_vars, d_sort, *d_grammar, *d_blockingGrammar);
+    fun = solver->synthFun(d_symbol, d_vars, d_sort, *d_grammar, *d_blockingGrammar, *d_blockingGrammarGenerator);
   }
   else if (d_grammar != nullptr)
   {

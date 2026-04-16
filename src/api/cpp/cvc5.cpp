@@ -6867,7 +6867,8 @@ Term Solver::synthFunHelper(const std::string& symbol,
                             const Sort& sort,
                             bool isInv,
                             Grammar* grammar,
-                            Grammar* blockingGrammar) const
+                            Grammar* blockingGrammar,
+                            Grammar* blockingGrammarGenerator) const
 {
   // Note: boundVars, sort and grammar are checked in the caller to avoid
   //       double checks.
@@ -6889,6 +6890,14 @@ Term Solver::synthFunHelper(const std::string& symbol,
           << "invalid Start symbol for grammar, expected Start's sort to be "
           << *sort.d_type << " but found "
           << blockingGrammar->d_grammar->getNtSyms()[0].getType();
+    }
+    if (blockingGrammarGenerator)
+    {
+      CVC5_API_CHECK(blockingGrammarGenerator->d_grammar->getNtSyms()[0].getType()
+                     == *sort.d_type)
+          << "invalid Start symbol for grammar, expected Start's sort to be "
+          << *sort.d_type << " but found "
+          << blockingGrammarGenerator->d_grammar->getNtSyms()[0].getType();
     }
     varTypes.push_back(bv.d_node->getType());
   }
@@ -6912,6 +6921,16 @@ Term Solver::synthFunHelper(const std::string& symbol,
              "non-terminal symbol";
     }
   }
+
+  if (blockingGrammarGenerator)
+  {
+    for (const auto& sym : blockingGrammarGenerator->d_grammar->getNtSyms())
+    {
+      CVC5_API_CHECK(!blockingGrammarGenerator->d_grammar->getRulesFor(sym).empty())
+          << "invalid grammar, must have at least one rule for each "
+             "non-terminal symbol";
+    }
+  }
   //////// all checks before this line
 
   internal::TypeNode funType =
@@ -6922,10 +6941,14 @@ Term Solver::synthFunHelper(const std::string& symbol,
 
   std::vector<internal::Node> bvns = Term::termVectorToNodes(boundVars);
 
+  if (blockingGrammarGenerator != nullptr){
+    Trace("parser-sygus") << "Parsed blocking grammar generator in synth fun helper!!" << blockingGrammarGenerator << "\n";
+  }
   d_slv->declareSynthFun(
       fun,
       grammar == nullptr ? funType : *grammar->resolve().d_type,
       blockingGrammar == nullptr ? funType : *blockingGrammar->resolve().d_type,
+      blockingGrammarGenerator == nullptr ? funType : *blockingGrammarGenerator->resolve().d_type,
       isInv,
       bvns);
 
@@ -8777,7 +8800,8 @@ Term Solver::synthFun(const std::string& symbol,
                       const std::vector<Term>& boundVars,
                       Sort sort,
                       Grammar& grammar,
-                      Grammar& blockingGrammar) const
+                      Grammar& blockingGrammar,
+                      Grammar& blockingGrammarGenerator) const
 {
   CVC5_API_TRY_CATCH_BEGIN;
   CVC5_API_SOLVER_CHECK_BOUND_VARS(boundVars);
@@ -8788,7 +8812,7 @@ Term Solver::synthFun(const std::string& symbol,
       << "cannot call synthFun unless sygus is enabled (use --"
       << internal::options::quantifiers::longName::sygus << ")";
   //////// all checks before this line
-  return synthFunHelper(symbol, boundVars, sort, false, &grammar, &blockingGrammar);
+  return synthFunHelper(symbol, boundVars, sort, false, &grammar, &blockingGrammar, &blockingGrammarGenerator);
   ////////
   CVC5_API_TRY_CATCH_END;
 }

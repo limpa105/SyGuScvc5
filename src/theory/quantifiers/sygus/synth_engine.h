@@ -45,6 +45,9 @@ class SynthEngine : public QuantifiersModule
    * Called at the beginning of each call to solve a synthesis problem, which
    * may be e.g. a check-synth or get-abduct call.
    */
+
+  std::map<Node, std::pair<TypeNode, TypeNode>> d_pendingBlockingUpdates;
+  
   void presolve() override;
   /** needs check, return true if e is last call */
   bool needsCheck(Theory::Effort e) override;
@@ -69,6 +72,13 @@ class SynthEngine : public QuantifiersModule
    * SynthConjecture::getSynthSolutions.
    */
   bool getSynthSolutions(std::map<Node, std::map<Node, Node> >& sol_map);
+
+
+  bool getFailedSolutions(
+    std::map<Node, std::vector<std::map<Node, Node>>>& sol_map);
+
+    
+  
   /** preprocess notify assertion (before rewrite)
    *
    * The purpose of this method is to inform the solution reconstruction
@@ -79,9 +89,15 @@ class SynthEngine : public QuantifiersModule
    */
   void ppNotifyAssertions(const std::vector<Node>& assertions) override;
 
+  void updateBlockingTypeForSynthFun(Node sf, TypeNode bt, TypeNode bgg);
+
+  
+
  private:
   /** The synthesis conjectures that this class is managing. */
   std::vector<std::unique_ptr<SynthConjecture> > d_conjs;
+
+  TermDbSygus* d_tds;
   /**
    * The first conjecture in the above vector. We track this conjecture
    * so that a synthesis conjecture can be preregistered during a call to

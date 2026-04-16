@@ -69,6 +69,7 @@ Result SynthVerify::verify(Node query,
                            std::vector<Node>& mvs)
 {
   Node queryp = preprocessQueryInternal(query);
+   //Trace("smt-debug-final") << "QUERY " << queryp << std::endl;
   bool finished;
   Result r;
   do

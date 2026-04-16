@@ -325,6 +325,44 @@ bool TermDbSygus::registerSygusType(TypeNode tn)
   return true;
 }
 
+void TermDbSygus::updateBlockingTypeForSynthFun(Node sf, TypeNode bt)
+{
+  Trace("sygus-block") << "updateBlockingTypeForSynthFun sf=" << sf
+                       << " bt=" << bt << "\n";
+
+  // update the synth-fun symbol itself too
+  if (!sf.isNull())
+  {
+    SygusUtils::setSygusBlockingType(sf, bt);
+  }
+
+  for (const auto& es : d_enum_to_synth_fun)
+  {
+    Node e = es.first;
+    Node f = es.second;
+    bool match = (f == sf);
+
+    if (!match && f.getKind() == Kind::SKOLEM)
+    {
+      std::vector<Node> ski = f.getSkolemIndices();
+      if (ski.size() == 2 && ski[1] == sf)
+      {
+        match = true;
+      }
+    }
+
+    if (match)
+    {
+      Trace("sygus-block") << "  updating enumerator " << e
+                           << " for synth-fun " << sf << "\n";
+      registerSygusType(bt);
+      SygusUtils::setSygusBlockingType(e, bt);
+      Trace("sygus-block") << "  readback bt(e)="
+                           << SygusUtils::getSygusBlockingType(e) << "\n";
+    }
+  }
+}
+
 void TermDbSygus::registerEnumerator(Node e,
                                      Node f,
                                      SynthConjecture* conj,
@@ -342,8 +380,9 @@ void TermDbSygus::registerEnumerator(Node e,
   d_enum_to_conjecture[e] = conj;
   d_enum_to_synth_fun[e] = f;
   TypeNode blk = SygusUtils::getSygusBlockingType(f);
+  TypeNode bgg = SygusUtils::getSygusBlockingGeneratorType(f);
 
-    if (blk.isNull() && f.getKind() == Kind::SKOLEM)
+  if (blk.isNull() && f.getKind() == Kind::SKOLEM)
   {
     // Try to read its indices; for non-internal skolems this should be empty.
     std::vector<Node> ski = f.getSkolemIndices();
@@ -367,6 +406,33 @@ void TermDbSygus::registerEnumerator(Node e,
     registerSygusType(blk);
     SygusUtils::setSygusBlockingType(e, blk);
   }
+
+
+  if (bgg.isNull() && f.getKind() == Kind::SKOLEM)
+  {
+    // Try to read its indices; for non-internal skolems this should be empty.
+    std::vector<Node> ski = f.getSkolemIndices();
+    Trace("sygus-block") << "registerEnumerator: f=" << f
+                        << " skolemId=" << f.getSkolemId()
+                        << " indices.size()=" << ski.size() << "\n";
+
+    if (ski.size() == 2)
+    {
+      Node sf = ski[1];  // original synth-fun symbol (common convention here)
+      bgg = SygusUtils::getSygusBlockingGeneratorType(sf);
+      Trace("sygus-block") << "registerEnumerator: fallback sf=" << sf
+                          << " blk=" << blk << "\n";
+    }
+  }
+
+  if (!bgg.isNull())
+  {
+    Trace("sygus-block") << "Copy blocking type to enumerator " << e
+                        << " : " << bgg << "\n";
+    registerSygusType(bgg);
+    SygusUtils::setSygusBlockingGeneratorType(e, bgg);
+  }
+
   NodeManager* nm = nodeManager();
 
   Trace("sygus-db") << "  registering symmetry breaking clauses..."

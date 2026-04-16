@@ -64,6 +64,9 @@ class SygusEnumeratorCallback : public SygusTermEnumeratorCallback,
 
   void setBlockingGrammarType(const TypeNode& stn) { d_blockingGrammarStn = stn; }
 
+  void setBlockingGeneratorGrammarType(const TypeNode& stn) { d_blockingGeneratorGrammarStn = stn; }
+
+
   std::vector<Node> d_smtTerms;
 
   //bool isInBlockingGrammarBuiltin(const Node& bn) const;
@@ -91,6 +94,8 @@ class SygusEnumeratorCallback : public SygusTermEnumeratorCallback,
   ExampleEvalCache* d_eec;
 
   TypeNode d_blockingGrammarStn;
+
+  TypeNode d_blockingGeneratorGrammarStn;
   
 };
 

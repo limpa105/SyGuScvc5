@@ -23,6 +23,7 @@
 #include "theory/quantifiers/sygus_sampler.h"
 #include "theory/rewriter.h"
 #include "smt/solver_engine.h"
+#include "expr/dtype_cons.h"
 
 namespace cvc5::internal {
 namespace theory {
@@ -35,6 +36,59 @@ SygusEnumeratorCallback::SygusEnumeratorCallback(Env& env,
     : EnvObj(env), d_tds(tds), d_stats(s), d_eec(eec)
 {
 }
+
+
+
+
+void dumpSygusGrammar(const TypeNode& tn, const std::string& name)
+{
+  Trace("sygus-grammar") << "==== Grammar dump: " << name << " ====\n";
+
+  if (tn.isNull() || !tn.isDatatype())
+  {
+    Trace("sygus-grammar") << "  (not a datatype)\n";
+    return;
+  }
+
+  const DType& dt = tn.getDType();
+  if (!dt.isSygus())
+  {
+    Trace("sygus-grammar") << "  (not a sygus datatype)\n";
+    return;
+  }
+
+  for (size_t i = 0, n = dt.getNumConstructors(); i < n; i++)
+  {
+    const DTypeConstructor& cons = dt[i];
+    Node op = cons.getSygusOp();
+
+    Trace("sygus-grammar") << "  cons[" << i << "]: ";
+    if (!op.isNull())
+    {
+      Trace("sygus-grammar") << op;
+    }
+    else
+    {
+      Trace("sygus-grammar") << "(no op)";
+    }
+
+    Trace("sygus-grammar") << " args=(";
+    for (size_t j = 0, nargs = cons.getNumArgs(); j < nargs; j++)
+    {
+      Trace("sygus-grammar") << cons.getArgType(j);
+      if (j + 1 < nargs)
+      {
+        Trace("sygus-grammar") << ", ";
+      }
+    }
+    Trace("sygus-grammar") << ")\n";
+  }
+
+  Trace("sygus-grammar") << "===============================\n";
+}
+
+
+
 
 
 bool SygusEnumeratorCallback::addTerm(const Node& n,
@@ -53,6 +107,10 @@ bool SygusEnumeratorCallback::addTerm(const Node& n,
   Node cval = getCacheValue(n, bn);
   Node bnRaw = datatypes::utils::sygusToBuiltin(n, /*isExternal=*/true);
 
+//   Trace("sygus-grammar") << "Checking term: " << bnRaw << "\n";
+// dumpSygusGrammar(d_blockingGrammarStn, "BLOCKING");
+// dumpSygusGrammar(d_blockingGeneratorGrammarStn, "GENERATOR");
+
 
   // If we've seen it already (either accepted or blocked earlier), stop now
   if (bterms.find(cval) != bterms.end())
@@ -65,19 +123,45 @@ bool SygusEnumeratorCallback::addTerm(const Node& n,
   
   
   // Now do blocking grammar pruning (but after caching)
-  if (!d_blockingGrammarStn.isNull() && simp.getNumChildren() != 0)
+  if (!d_blockingGrammarStn.isNull())
   {
-    bool inbg = datatypes::utils::isBuiltinTermInSygusGrammarDbg(d_env, bnRaw, d_blockingGrammarStn, /*allowVars=*/true);
-    if (inbg)
-    {
-      Trace("sygus-enum-exc-call") << "Exclude (by blocking grammar): " << bnRaw << "\n";
-      bterms.insert(cval);
-      return false;
-    }
-    // else {
-    //   Trace("sygus-enum-exc-call") << "Blocking grammar did not execlude " << bnRaw << "\n";
+    //  Trace("sygus-enum-exc-call-b")
+    //   << "Checking bnRaw=" << bnRaw
+    //   << " against blockingGrammarStn=" << d_blockingGrammarStn
+    //   << " isDatatype=" << d_blockingGrammarStn.isDatatype()
+    //   << " isSygusDatatype="
+    //   << (d_blockingGrammarStn.isDatatype()
+    //       && d_blockingGrammarStn.getDType().isSygus())
+    //   << "\n";
+    //   Trace("sygus-enum-exc-call-b")
+    //     << "blockingGrammarStn = " << d_blockingGrammarStn << "\n";
+    // if (d_blockingGrammarStn.isDatatype())
+    // {
+    //   const DType& dt = d_blockingGrammarStn.getDType();
+    //   Trace("sygus-enum-exc-call-b")
+    //       << "blockingGrammarStn numConstructors = "
+    //       << dt.getNumConstructors() << "\n";
+    //   for (size_t i = 0, n = dt.getNumConstructors(); i < n; i++)
+    //   {
+    //     Trace("sygus-enum-exc-call-b")
+    //         << "  cons[" << i << "] = " << dt[i].getSygusOp() << "\n";
+    //   }
     // }
-
+    bool inbgg = datatypes::utils::isBuiltinTermInSygusGrammarDbg(d_env, bnRaw, d_blockingGeneratorGrammarStn, /*allowVars=*/true);
+    if (!inbgg){
+    bool inbg = datatypes::utils::isBuiltinTermInSygusGrammarDbg(d_env, bnRaw, d_blockingGrammarStn, /*allowVars=*/true);
+        if (inbg)
+        {
+          Trace("sygus-enum-exc-call") << "Exclude (by blocking grammar): " << bnRaw << "\n";
+          bterms.insert(cval);
+          return false;
+        }
+        else {
+        Trace("sygus-enum-exc-call-b") << "Blocking grammar did not exclude " << bnRaw << "\n";
+        }
+    } else {
+      Trace("sygus-enum-exc-call-b") << "Blockig generator generated " << bnRaw << "\n";
+    }
   }
 
   

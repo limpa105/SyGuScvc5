@@ -378,7 +378,8 @@ static bool isBuiltinInGrammarRecDbg(
   }
 
   // Memo (use rewritten t to reduce churn)
-  Node tr = env.getRewriter()->rewrite(t);
+  Node tr = t;
+  //Node tr = env.getRewriter()->rewrite(t);
   TnNodeKey key{stn, tr};
   auto itM = memo.find(key);
   if (itM != memo.end())
@@ -452,8 +453,8 @@ bool isBuiltinTermInSygusGrammarDbg(Env& env,
     Node vlist = gdt.getSygusVarList();
     Trace("sygus-bg-mem") << "  varList = " << vlist << "\n";
   }
-
-  Node tr = env.getRewriter()->rewrite(t);
+  Node tr = t;
+  //Node tr = env.getRewriter()->rewrite(t);
   Trace("sygus-bg-mem") << "  rewrite(t) = " << tr << "\n";
 
   bool r0 = isBuiltinTermInSygusGrammar(env, t, stn, allowVars);

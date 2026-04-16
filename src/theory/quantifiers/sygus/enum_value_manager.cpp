@@ -245,6 +245,16 @@ void EnumValueManager::notifyCandidate(bool modelSuccess)
   }
 }
 
+void EnumValueManager::updateBlockingGrammarTypes(TypeNode blk, TypeNode blg)
+{
+  if (d_evg != nullptr)
+  {
+    d_evg->updateBlockingGrammarTypes(blk, blg);
+  }
+}
+
+
+
 ExampleEvalCache* EnumValueManager::getExampleEvalCache()
 {
   return d_eec.get();

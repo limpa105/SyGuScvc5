@@ -33,10 +33,11 @@ SynthEngine::SynthEngine(Env& env,
                          TermRegistry& tr)
     : QuantifiersModule(env, qs, qim, qr, tr),
       d_conj(nullptr),
-      d_statistics(statisticsRegistry())
+      d_statistics(statisticsRegistry()),
+      d_tds(tr.getTermDatabaseSygus())
 {
   d_conjs.push_back(std::unique_ptr<SynthConjecture>(
-      new SynthConjecture(env, qs, qim, qr, tr, d_statistics)));
+      new SynthConjecture(env, qs, qim, qr, tr, d_statistics, this)));
   d_conj = d_conjs.back().get();
 }
 
@@ -66,39 +67,72 @@ QuantifiersModule::QEffort SynthEngine::needsModel(Theory::Effort e)
 
 void SynthEngine::check(Theory::Effort e, QEffort quant_e)
 {
-  // are we at the proper effort level?
+  Trace("sygus-lifecycle") << "ENTER CHECK numConjs=" << d_conjs.size()
+                         << " pendingUpdates=" << d_pendingBlockingUpdates.size()
+                         << "\n";
   if (quant_e != QEFFORT_MODEL)
   {
     return;
   }
+
+  Trace("sygus-block") << "CHECK map ptr=" << &d_pendingBlockingUpdates
+                      << " size=" << d_pendingBlockingUpdates.size() << "\n";
   Trace("sygus-engine") << "---Counterexample Guided Instantiation Engine---"
                         << std::endl;
-  Trace("sygus-engine-debug") << std::endl;
+
   Valuation& valuation = d_qstate.getValuation();
   std::vector<SynthConjecture*> activeCheckConj;
+
   for (unsigned i = 0, size = d_conjs.size(); i < size; i++)
   {
     SynthConjecture* sc = d_conjs[i].get();
-    bool active = false;
-    bool value;
-    if (valuation.hasSatValue(sc->getConjecture(), value))
+
+    if (sc->isAssigned())
     {
+      for (const auto& pu : d_pendingBlockingUpdates)
+      {
+        Node sf = pu.first;
+        TypeNode bt = pu.second.first;
+        TypeNode bgg = pu.second.second;
+
+        Trace("sygus-block") << "Replaying pending blocking update in check: "
+                             << "conj[" << i << "] ptr=" << sc
+                             << " sf=" << sf
+                             << " bt=" << bt
+                             << " bgg=" << bgg << "\n";
+
+        sc->updateBlockingTypeForSynthFun(sf, bt, bgg);
+      }
+    }
+    d_pendingBlockingUpdates.clear();
+
+    Trace("sygus-active") << "conj[" << i << "] assigned="
+                          << sc->isAssigned()
+                          << " conjecture=" << sc->getConjecture() << "\n";
+
+    bool active = false;
+    bool value = false;
+    if (sc->isAssigned() && valuation.hasSatValue(sc->getConjecture(), value))
+    {
+      Trace("sygus-active") << "  hasSatValue=yes value=" << value << "\n";
       active = value;
     }
     else
     {
-      Trace("sygus-engine-debug") << "...no value for quantified formula."
-                                  << std::endl;
+      Trace("sygus-active") << "  hasSatValue=no\n";
     }
-    Trace("sygus-engine-debug")
-        << "Current conjecture status : active : " << active << std::endl;
+
+    Trace("sygus-active") << "  final active=" << active << "\n";
+
     if (active && sc->needsCheck())
     {
       activeCheckConj.push_back(sc);
     }
   }
+
   if (activeCheckConj.empty())
   {
+    Trace("sygus-active") << "no active conjectures\n";
     return;
   }
 
@@ -107,8 +141,6 @@ void SynthEngine::check(Theory::Effort e, QEffort quant_e)
   do
   {
     rm->spendResource(Resource::SygusCheckStep);
-    Trace("sygus-engine-debug") << "Checking " << activeCheckConj.size()
-                                << " active conjectures..." << std::endl;
     for (unsigned i = 0, size = activeCheckConj.size(); i < size; i++)
     {
       SynthConjecture* sc = activeCheckConj[i];
@@ -122,21 +154,31 @@ void SynthEngine::check(Theory::Effort e, QEffort quant_e)
     acnext.clear();
   } while (!activeCheckConj.empty() && !d_qstate.getValuation().needCheck()
            && !rm->out());
-  Trace("sygus-engine")
-      << "Finished Counterexample Guided Instantiation engine." << std::endl;
 }
 
 void SynthEngine::assignConjecture(Node q)
 {
+  Trace("sygus-lifecycle") << "ASSIGN CONJECTURE q=" << q << "\n";
   Trace("sygus-engine") << "SynthEngine::assignConjecture " << q << std::endl;
   // allocate a new synthesis conjecture if not assigned
   if (d_conjs.back()->isAssigned())
   {
     d_conjs.push_back(std::unique_ptr<SynthConjecture>(new SynthConjecture(
-        d_env, d_qstate, d_qim, d_qreg, d_treg, d_statistics)));
+        d_env, d_qstate, d_qim, d_qreg, d_treg, d_statistics, this)));
   }
   // LOOK HERE WE CREATE A CONJECTURE
   d_conjs.back()->assign(q);
+  for (const auto& pu : d_pendingBlockingUpdates)
+  {
+    Node sf = pu.first;
+    TypeNode bt = pu.second.first;
+    TypeNode bgg = pu.second.second;
+
+    Trace("sygus-block") << "Replaying pending blocking update after assign: "
+                        << "sf=" << sf << " bt=" << bt << " bgg=" << bgg << "\n";
+
+    d_conjs.back()->updateBlockingTypeForSynthFun(sf, bt, bgg);
+  }
 }
 
 void SynthEngine::checkOwnership(Node q)
@@ -215,6 +257,27 @@ bool SynthEngine::checkConjecture(SynthConjecture* conj)
   return ret;
 }
 
+void SynthEngine::updateBlockingTypeForSynthFun(Node sf,
+                                                TypeNode bt,
+                                                TypeNode bgg)
+{
+  Trace("sygus-block") << "STORE update sf=" << sf
+                       << " bt=" << bt
+                       << " bgg=" << bgg << "\n";
+
+  d_pendingBlockingUpdates[sf] = {bt, bgg};  // ✅ THIS IS CRITICAL
+  Trace("sygus-block") << "STORE map ptr=" << &d_pendingBlockingUpdates
+                     << " size=" << d_pendingBlockingUpdates.size() << "\n";
+
+  Trace("sygus-block") << "map size now="
+                       << d_pendingBlockingUpdates.size() << "\n";
+
+  for (unsigned i = 0, size = d_conjs.size(); i < size; i++)
+  {
+    d_conjs[i]->updateBlockingTypeForSynthFun(sf, bt, bgg);
+  }
+}
+
 bool SynthEngine::getSynthSolutions(
     std::map<Node, std::map<Node, Node> >& sol_map)
 {
@@ -227,6 +290,28 @@ bool SynthEngine::getSynthSolutions(
     if (d_conjs[i]->isAssigned())
     {
       if (!d_conjs[i]->getSynthSolutions(sol_map))
+      {
+        // if one conjecture fails, we fail overall
+        ret = false;
+        break;
+      }
+    }
+  }
+  return ret;
+}
+
+bool SynthEngine::getFailedSolutions(
+    std::map<Node, std::vector<std::map<Node, Node>>>& sol_map)
+{
+  // Note that d_conjs should be size one. If it has not been assigned,
+  // by convention we return true for this method, which may correspond to
+  // a case where all functions-to-synthesize were unconstrained.
+  bool ret = true;
+  for (unsigned i = 0, size = d_conjs.size(); i < size; i++)
+  {
+    if (d_conjs[i]->isAssigned())
+    {
+      if (!d_conjs[i]->getFailedSolutions(sol_map))
       {
         // if one conjecture fails, we fail overall
         ret = false;

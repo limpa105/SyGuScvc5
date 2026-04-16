@@ -6833,7 +6833,8 @@ class CVC5_EXPORT Solver
                 const std::vector<Term>& boundVars,
                 Sort sort,
                 Grammar& grammar,
-                Grammar& blockingGrammar) const;
+                Grammar& blockingGrammar,
+                Grammar& blockingGeneratorGrammar) const;
 
   /**
    * Add a forumla to the set of Sygus constraints.
@@ -7100,7 +7101,8 @@ class CVC5_EXPORT Solver
                       const Sort& sort,
                       bool isInv = false,
                       Grammar* grammar = nullptr,
-                      Grammar* blockingGrammar = nullptr) const;
+                      Grammar* blockingGrammar = nullptr,
+                      Grammar* blockingGrammarGenertor = nullptr) const;
 
   /** Helper for getting timeout cores */
   std::pair<Result, std::vector<Term>> getTimeoutCoreHelper(

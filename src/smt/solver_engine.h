@@ -127,6 +127,9 @@ class CVC5_EXPORT SolverEngine
    * by the above call.
    */
   bool isFullyInited() const;
+
+  void updateBlockingTypeForSynthFun(Node sf, TypeNode bt, TypeNode bgg);
+  
   /**
    * @return True if a call to check-sat or check-synth has been made and
    * completed. Other calls (e.g., get-interpolant, get-abduct, get-qe) do not
@@ -410,6 +413,14 @@ class CVC5_EXPORT SolverEngine
                                    bool isInv,
                                    const std::vector<Node>& vars);
 
+  void declareSynthFun(Node func,
+                                   TypeNode sygusType,
+                                   TypeNode blockingSygusType,
+                                   TypeNode blockingGeneratorSygusType,
+                                   bool isInv,
+                                   const std::vector<Node>& vars);
+
+
   /**
    * Add a regular sygus constraint or assumption.
    * @param n The formula
@@ -640,7 +651,19 @@ class CVC5_EXPORT SolverEngine
    * for incrementally computing the result of a
    * quantifier elimination.
    */
+
+  bool getSubsolverFailedSynthSolutions(
+    std::map<Node, std::vector<std::map<Node, Node>>>& solMap);
+
+
+  bool getFailedSynthSolutions(
+    std::map<Node, std::vector<std::map<Node, Node>>>& solMap);
+    
+
   Node getQuantifierElimination(Node q, bool doFull);
+
+
+  
 
   /**
    * This method asks this SMT engine to find an interpolant with respect to

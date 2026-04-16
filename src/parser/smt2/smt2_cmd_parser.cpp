@@ -947,47 +947,54 @@ std::unique_ptr<Cmd> Smt2CmdParser::parseNextCommand()
 
       
       Grammar* bg = nullptr;
-      if (d_lex.peekToken() == Token::KEYWORD)
-      {
-        // tokenStr may or may not include the leading ':'
-        std::string ks = d_lex.tokenStr();
-        if (ks == ":blocking_grammar" || ks == "blocking_grammar")
-        {
-          // consume keyword; returns "blocking_grammar"
-          std::string key = d_tparser.parseKeyword();
+Grammar* bgg = nullptr;
 
-          bg = d_tparser.parseGrammarOrNull(sygusVars, name + "_bg");
-          Trace("parser-sygus") << "Parsed blocking grammar? " << (bg != nullptr)
-                      << " peekTok=" << d_lex.peekToken()
-                      << " tokStr=" << d_lex.tokenStr() << "\n";
-          Trace("parser-sygus") << "Parsed blocking grammar? " << (bg != nullptr) << "\n";
-          if (bg != nullptr)
-          {
-            Trace("parser-sygus") << "Parsed blocking grammar (bg != null)\n";
-            Trace("parser-sygus") << "BG:\n" << *bg << "\n";
-          }
-          else
-          {
-            Trace("parser-sygus") << "No blocking grammar parsed (bg == null)\n";
-          }
-          // if (bg != nullptr)
-          // {
-          //   Trace("parser-sygus") << "BG addr=" << bg << "\n";
-          //   // If Grammar has anything like these, print them:
-          //   Trace("parser-sygus") << "BG start=" << bg->getStartSymbol() << "\n";
-          //   Trace("parser-sygus") << "BG #nts=" << bg->getNumNonTerminals() << "\n";
-          //   Trace("parser-sygus") << "BG #rules(start)=" << bg->getNumRules(bg->getStartSymbol()) << "\n";
-          // }
-          // if (bg == nullptr)
-          // {
-          //   d_lex.parseError("Expected <grammar> after :blocking_grammar");
-          // }
+if (d_lex.peekToken() == Token::KEYWORD)
+{
+  std::string key = d_tparser.parseKeyword();
+  if (key == "blocking_grammar")
+  {
+    bg = d_tparser.parseGrammarOrNull(sygusVars, name + "_bg");
+    if (bg == nullptr)
+    {
+      d_lex.parseError("Expected <grammar> after :blocking_grammar");
+    }
+
+    Trace("parser-sygus") << "Parsed blocking grammar\n";
+    Trace("parser-sygus") << "BG:\n" << *bg << "\n";
+
+    // generator only allowed if blocking grammar exists
+    if (d_lex.peekToken() == Token::KEYWORD)
+    {
+      std::string key2 = d_tparser.parseKeyword();
+      if (key2 == "blocking_grammar_generator")
+      {
+        bgg = d_tparser.parseGrammarOrNull(sygusVars, name + "_bgg");
+        if (bgg == nullptr)
+        {
+          d_lex.parseError(
+              "Expected <grammar> after :blocking_grammar_generator");
         }
+
+        Trace("parser-sygus") << "Parsed blocking grammar generator\n";
+        Trace("parser-sygus") << "BGG:\n" << *bgg << "\n";
       }
+      else
+      {
+        d_lex.parseError(
+            "Expected :blocking_grammar_generator after :blocking_grammar");
+      }
+    }
+  }
+  else
+  {
+    d_lex.parseError("Unexpected keyword in synth-fun: :" + key);
+  }
+}
 
       Trace("parser-sygus") << "Define synth fun : " << name << std::endl;
       d_state.popScope();
-      cmd.reset(new SynthFunCommand(name, sygusVars, range, g, bg));
+      cmd.reset(new SynthFunCommand(name, sygusVars, range, g, bg, bgg));
     }
     break;
     case Token::EOF_TOK:

@@ -50,13 +50,15 @@ SynthConjecture::SynthConjecture(Env& env,
                                  QuantifiersInferenceManager& qim,
                                  QuantifiersRegistry& qr,
                                  TermRegistry& tr,
-                                 SygusStatistics& s)
+                                 SygusStatistics& s,
+                                 SynthEngine* parent)
     : EnvObj(env),
       d_qstate(qs),
       d_qim(qim),
       d_qreg(qr),
       d_treg(tr),
       d_stats(s),
+       d_parent(parent),
       d_tds(tr.getTermDatabaseSygus()),
       d_verify(env, d_tds),
       d_hasSolution(false),
@@ -113,6 +115,7 @@ void SynthConjecture::presolve()
     d_computedSolution = false;
     d_sol.clear();
     d_solStatus.clear();
+    d_failedSolutions.clear();
   }
 }
 
@@ -321,6 +324,63 @@ void SynthConjecture::assign(Node q)
 
   Trace("cegqi") << "...finished, single invocation = " << isSingleInvocation()
                  << std::endl;
+}
+
+void SynthConjecture::updateBlockingTypeForSynthFun(Node sf,
+                                                    TypeNode bt,
+                                                    TypeNode bgg)
+{
+  Trace("sygus-block") << "SC::updateBlockingTypeForSynthFun sf=" << sf
+                       << " bt=" << bt << " bgg=" << bgg
+                       << " d_candidates.size=" << d_candidates.size()
+                       << "\n";
+
+  if (d_candidates.empty())
+  {
+    Trace("sygus-block")
+        << "SC::updateBlockingTypeForSynthFun: no candidates yet; "
+        << "update arrived before assign()/enumerator creation\n";
+    return;
+  }
+
+  bool anyMatch = false;
+
+  for (const Node& e : d_candidates)
+  {
+    Node esf = d_tds->getSynthFunForEnumerator(e);
+
+    Trace("sygus-block") << "  candidate e=" << e
+                         << " esf=" << esf << "\n";
+
+    bool match = (esf == sf);
+    if (!match && esf.getKind() == Kind::SKOLEM)
+    {
+      std::vector<Node> ski = esf.getSkolemIndices();
+      Trace("sygus-block") << "    skolem indices size=" << ski.size()
+                           << " indices=" << ski << "\n";
+      if (ski.size() == 2 && ski[1] == sf)
+      {
+        match = true;
+      }
+    }
+
+    Trace("sygus-block") << "    match=" << match << "\n";
+
+    if (match)
+    {
+      anyMatch = true;
+      Trace("sygus-block") << "  forcing EnumValueManager for e=" << e << "\n";
+      EnumValueManager* evm = getEnumValueManagerFor(e);
+      Trace("sygus-block") << "  updating live enumerator " << e
+                           << " for synth-fun " << sf << "\n";
+      evm->updateBlockingGrammarTypes(bt, bgg);
+      Trace("sygus-block") << "  finished updating live enumerator "
+                           << e << "\n";
+    }
+  }
+
+  Trace("sygus-block") << "SC::updateBlockingTypeForSynthFun anyMatch="
+                       << anyMatch << "\n";
 }
 
 
@@ -545,7 +605,7 @@ bool SynthConjecture::doCheck()
                                  candidate_values.begin(),
                                  candidate_values.end());
   query = rewrite(query);
-  Trace("sygus-engine-debug") << "Rewritten query is " << query << std::endl;
+  //Trace("smt-debug-FINAL") << "Rewritten query is " << query << std::endl;
   if (expr::hasFreeVar(query))
   {
     Trace("sygus-engine-debug")
@@ -594,24 +654,31 @@ bool SynthConjecture::doCheck()
   }
 
   // print the candidate solution for debugging
-  if (constructed_cand && printDebug)
+  // if (constructed_cand && printDebug)
+  // {
+  std::stringstream ss;
+  ss << "(sygus-candidate ";
+  for (size_t i = 0, ncands = candidate_values.size(); i < ncands; i++)
   {
-    std::ostream& out = output(OutputTag::SYGUS);
-    out << "(sygus-candidate ";
-    Assert(d_quant[0].getNumChildren() == candidate_values.size());
-    for (size_t i = 0, ncands = candidate_values.size(); i < ncands; i++)
-    {
-      Node v = candidate_values[i];
-      out << "(" << d_quant[0][i] << " ";
-      TermDbSygus::toStreamSygus(out, v);
-      out << ")";
-    }
-    out << ")" << std::endl;
+    Node v = candidate_values[i];
+    ss << "(" << d_quant[0][i] << " ";
+    TermDbSygus::toStreamSygus(ss, v);
+    ss << ")";
+    Node bv = datatypes::utils::sygusToBuiltin(v, true);
+    //std::cout << "raw: " << v << "\n";
+    //std::cout << "builtin: " << bv << "\n";
   }
+  ss << ")";
+
+  //std::cout << "THIS " << ss.str() << "\n" << std::flush;
+ // }
 
   // Record the solution, which may be falsified below. We require recording
   // here since the result of the satisfiability test may be unknown.
   recordSolution(candidate_values);
+  // TODO 0 is hard coded this is okay for our application but might be bad for the future!!!
+  Node bv = datatypes::utils::sygusToBuiltin(candidate_values[0], true);
+
 
   std::vector<Node> skModel;
   Result r = d_verify.verify(query, d_innerSks, skModel);
@@ -619,7 +686,20 @@ bool SynthConjecture::doCheck()
   if (r.getStatus() == Result::SAT)
   {
     // we have a counterexample
+    std::vector<Node> failedBuiltin;
+    for (const Node& cv : candidate_values)
+    {
+      failedBuiltin.push_back(datatypes::utils::sygusToBuiltin(cv, true));
+    }
+    Trace("smt-debug-FINAL") << failedBuiltin << "\n";
+    d_failedSolutions.push_back(failedBuiltin);
+    if (d_parent != nullptr)
+    {
+      d_parent->notifyFailedSolution(d_quant, failedBuiltin);
+    }
+    Trace("smt-debug-FINAL") << skModel << "\n";
     return processCounterexample(skModel);
+    
   }
   else if (r.getStatus() != Result::UNSAT)
   {
@@ -983,6 +1063,46 @@ bool SynthConjecture::runExprMiner()
   }
   return doExclude;
 }
+
+bool SynthConjecture::getFailedSolutionsInternal(
+    std::vector<std::vector<Node>>& badSols)
+{
+  if (!d_failedSolutions.empty())
+  {
+    badSols.insert(
+        badSols.end(), d_failedSolutions.begin(), d_failedSolutions.end());
+  }
+  return true;
+}
+
+bool SynthConjecture::getFailedSolutions(
+    std::map<Node, std::vector<std::map<Node, Node>>>& sol_map)
+{
+  std::vector<std::vector<Node>> sols;
+  Trace("cegqi-debug") << "getFailedSolutions..." << std::endl;
+  if (!getFailedSolutionsInternal(sols))
+  {
+    Trace("cegqi-debug") << "...failed internal" << std::endl;
+    return false;
+  }
+
+  std::vector<std::map<Node, Node>>& smc = sol_map[d_quant];
+  for (const std::vector<Node>& solVec : sols)
+  {
+    Assert(solVec.size() == d_quant[0].getNumChildren());
+    std::map<Node, Node> candMap;
+    for (size_t i = 0, size = solVec.size(); i < size; i++)
+    {
+      Node fvar = d_quant[0][i];
+      candMap[fvar] = solVec[i];
+      Trace("cegqi-debug") << "...failed sol for " << fvar << " : "
+                           << solVec[i] << std::endl;
+    }
+    smc.push_back(candMap);
+  }
+  return true;
+}
+
 
 bool SynthConjecture::getSynthSolutions(
     std::map<Node, std::map<Node, Node> >& sol_map)

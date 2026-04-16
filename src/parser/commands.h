@@ -519,7 +519,8 @@ class CVC5_EXPORT SynthFunCommand : public DeclarationDefinitionCommand
                   const std::vector<cvc5::Term>& vars,
                   cvc5::Sort sort,
                   cvc5::Grammar* g,
-                  cvc5::Grammar* blockingGrammar = nullptr);
+                  cvc5::Grammar* blockingGrammar = nullptr,
+                  cvc5::Grammar* blockingGrammarGenerator = nullptr);
   /** returns the input variables of the function-to-synthesize */
   const std::vector<cvc5::Term>& getVars() const;
   /** returns the sygus sort of the function-to-synthesize */
@@ -529,6 +530,9 @@ class CVC5_EXPORT SynthFunCommand : public DeclarationDefinitionCommand
 
   bool hasBlockingGrammar() const;
   cvc5::Grammar* getBlockingGrammar() const;
+
+  bool hasBlockingGrammarGenerator() const;
+  cvc5::Grammar* getBlockingGrammarGenerator() const;
 
   /** invokes this command
    *
@@ -550,6 +554,8 @@ class CVC5_EXPORT SynthFunCommand : public DeclarationDefinitionCommand
   cvc5::Grammar* d_grammar;
 
   cvc5::Grammar* d_blockingGrammar;
+
+  cvc5::Grammar* d_blockingGrammarGenerator;
 
 
 };
