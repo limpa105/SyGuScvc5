@@ -95,6 +95,13 @@ class SygusEnumerator : public EnumValGenerator
 
   void updateBlockingGrammarTypes(TypeNode blk, TypeNode blg) override;
 
+  Node d_bodyAssump;
+
+  void setBodyAssumption(Node a) { d_bodyAssump = a; }
+  Node getBodyAssumption() const { return d_bodyAssump; }
+
+
+
 
  private:
 

@@ -26,6 +26,10 @@
 #include "theory/quantifiers/sygus/synth_conjecture.h"
 
 namespace cvc5::internal {
+
+namespace smt {
+class SygusSolver;
+}
 namespace theory {
 namespace quantifiers {
 
@@ -47,7 +51,11 @@ class SynthEngine : public QuantifiersModule
    */
 
   std::map<Node, std::pair<TypeNode, TypeNode>> d_pendingBlockingUpdates;
-  
+
+
+  void setSygusSolver(smt::SygusSolver* ss);
+  smt::SygusSolver* d_sygusSolver = nullptr;
+
   void presolve() override;
   /** needs check, return true if e is last call */
   bool needsCheck(Theory::Effort e) override;

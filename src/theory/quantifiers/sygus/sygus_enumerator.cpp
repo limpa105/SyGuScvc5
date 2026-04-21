@@ -64,6 +64,16 @@ void SygusEnumerator::initialize(Node e)
     d_secd = std::make_unique<SygusEnumeratorCallback>(d_env, d_tds, d_stats);
     d_sec = d_secd.get();
   }
+  if (d_bodyAssump != Node::null())
+  {
+    auto* sec = dynamic_cast<SygusEnumeratorCallback*>(d_sec);
+    if (sec != nullptr)
+    {
+      sec->setBodyAssumption(d_bodyAssump);
+      Trace("sygus-assump") << "SE::init passed body assumption to callback: "
+                            << d_bodyAssump << "\n";
+    }
+  }
   Trace("sygus-block") << "SE::init(" << e << ") ENTER"
                      << " d_secd=" << (d_secd ? "non-null" : "null")
                      << " d_sec=" << (d_sec ? "non-null" : "null")

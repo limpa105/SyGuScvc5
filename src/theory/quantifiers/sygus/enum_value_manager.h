@@ -58,6 +58,11 @@ class EnumValueManager : protected EnvObj
    * generating values.
    */
   Node getEnumeratedValue(bool& activeIncomplete);
+  void setBodyAssumption(Node a) { d_bodyAssump = a; }
+
+   Node d_bodyAssump;
+
+    Node getBodyAssumption() const { return d_bodyAssump; }
   /**
    * Notify that a synthesis candidate was tried, which clears the value
    * of d_evActiveGenWaiting, as well as the evaluation cache if modelSuccess

@@ -37,13 +37,31 @@ SynthEngine::SynthEngine(Env& env,
       d_tds(tr.getTermDatabaseSygus())
 {
   d_conjs.push_back(std::unique_ptr<SynthConjecture>(
-      new SynthConjecture(env, qs, qim, qr, tr, d_statistics, this)));
+      new SynthConjecture(env, qs, qim, qr, tr, d_statistics, d_sygusSolver)));
   d_conj = d_conjs.back().get();
 }
 
 SynthEngine::~SynthEngine() {}
 
 std::string SynthEngine::identify() const { return "SynthEngine"; }
+
+void SynthEngine::setSygusSolver(smt::SygusSolver* ss)
+{
+  Trace("failed-debug") << "SynthEngine::setSygusSolver this=" << this
+                        << " ss=" << ss
+                        << " d_conjs.size()=" << d_conjs.size() << "\n";
+
+  d_sygusSolver = ss;
+
+  for (auto& sc : d_conjs)
+  {
+    Trace("failed-debug") << "  sc ptr=" << sc.get() << "\n";
+    if (sc)
+    {
+      sc->setSygusSolver(ss);
+    }
+  }
+}
 
 void SynthEngine::presolve()
 {
@@ -164,7 +182,7 @@ void SynthEngine::assignConjecture(Node q)
   if (d_conjs.back()->isAssigned())
   {
     d_conjs.push_back(std::unique_ptr<SynthConjecture>(new SynthConjecture(
-        d_env, d_qstate, d_qim, d_qreg, d_treg, d_statistics, this)));
+        d_env, d_qstate, d_qim, d_qreg, d_treg, d_statistics,  d_sygusSolver)));
   }
   // LOOK HERE WE CREATE A CONJECTURE
   d_conjs.back()->assign(q);

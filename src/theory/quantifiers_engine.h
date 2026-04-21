@@ -31,6 +31,10 @@ namespace cvc5::internal {
 
 class TheoryEngine;
 
+namespace smt {
+class SygusSolver;
+}
+
 namespace theory {
 
 class RepSetIterator;
@@ -90,6 +94,12 @@ class QuantifiersEngine : protected EnvObj
    * This function is called after registerQuantifier for quantified formulas
    * that are pre-registered to the quantifiers theory.
    */
+   
+  void setSygusSolver(smt::SygusSolver* ss);
+
+  smt::SygusSolver* d_sygusSolver;
+
+
   void preRegisterQuantifier(Node q);
   /** assert universal quantifier */
   void assertQuantifier( Node q, bool pol );

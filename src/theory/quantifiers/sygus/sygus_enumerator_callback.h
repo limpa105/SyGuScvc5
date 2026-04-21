@@ -69,6 +69,11 @@ class SygusEnumeratorCallback : public SygusTermEnumeratorCallback,
 
   std::vector<Node> d_smtTerms;
 
+  Node d_bodyAssump;
+
+  void setBodyAssumption(Node a) { d_bodyAssump = a; }
+  Node getBodyAssumption() const { return d_bodyAssump; }
+
   //bool isInBlockingGrammarBuiltin(const Node& bn) const;
 
  protected:

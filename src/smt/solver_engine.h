@@ -104,6 +104,8 @@ class CVC5_EXPORT SolverEngine
   /** Destruct the SMT engine.  */
   ~SolverEngine();
 
+
+ 
   //--------------------------------------------- concerning the state
 
   /**
@@ -129,7 +131,7 @@ class CVC5_EXPORT SolverEngine
   bool isFullyInited() const;
 
   void updateBlockingTypeForSynthFun(Node sf, TypeNode bt, TypeNode bgg);
-  
+
   /**
    * @return True if a call to check-sat or check-synth has been made and
    * completed. Other calls (e.g., get-interpolant, get-abduct, get-qe) do not
@@ -662,6 +664,7 @@ class CVC5_EXPORT SolverEngine
 
   Node getQuantifierElimination(Node q, bool doFull);
 
+  void setSygusSolver(smt::SygusSolver* ss);
 
   
 

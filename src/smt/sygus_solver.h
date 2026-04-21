@@ -66,15 +66,27 @@ class SygusSolver : protected EnvObj
   ~SygusSolver();
 
 
+   std::vector<Node> d_impliedFailedSolutions;
+
+
 
   void initializeBlockingGrammar(Node fn, TypeNode blockingSygusType);
   bool noteFailedSynthSolution(const std::map<Node, Node>& solMap);
   void consumeNewFailedSynthSolutions();
+  bool checkimpliedFailedSolution(Node id, Node candidate);
   void refreshBlockingGrammarTypes();
 
   std::unordered_map<Node, SygusGrammar> d_blockingGrammars;
   std::unordered_map<Node, Node> d_blockingTopNts;
   size_t d_numProcessedFailedSols = 0;
+
+  Node d_boundVars;
+
+  Node d_universe;
+
+
+  Node getBodyAssumption() const;
+
 
 
   /**

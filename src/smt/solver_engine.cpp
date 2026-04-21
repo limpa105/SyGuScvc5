@@ -1968,6 +1968,14 @@ void SolverEngine::printInstantiations(std::ostream& out)
   }
 }
 
+void SolverEngine::setSygusSolver(smt::SygusSolver* ss)
+{
+  QuantifiersEngine* qe = d_smtSolver->getQuantifiersEngine();
+  if (qe != nullptr)
+  {
+    qe->setSygusSolver(ss);
+  }
+}
 
 void SolverEngine::updateBlockingTypeForSynthFun(Node sf,
                                                  TypeNode bt,

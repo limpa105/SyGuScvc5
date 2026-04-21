@@ -37,6 +37,7 @@
 #include "theory/quantifiers/term_util.h"
 #include "theory/rewriter.h"
 #include "theory/smt_engine_subsolver.h"
+#include "smt/sygus_solver.h"
 
 using namespace cvc5::internal::kind;
 using namespace std;
@@ -51,14 +52,14 @@ SynthConjecture::SynthConjecture(Env& env,
                                  QuantifiersRegistry& qr,
                                  TermRegistry& tr,
                                  SygusStatistics& s,
-                                 SynthEngine* parent)
+                                 smt::SygusSolver* parent)
     : EnvObj(env),
       d_qstate(qs),
       d_qim(qim),
       d_qreg(qr),
       d_treg(tr),
       d_stats(s),
-       d_parent(parent),
+      d_parentSolver(parent),
       d_tds(tr.getTermDatabaseSygus()),
       d_verify(env, d_tds),
       d_hasSolution(false),
@@ -93,6 +94,9 @@ SynthConjecture::SynthConjecture(Env& env,
     d_modules.push_back(d_sygus_ccore.get());
   }
   d_modules.push_back(d_ceg_cegis.get());
+
+  
+
 }
 
 SynthConjecture::~SynthConjecture() {}
@@ -691,12 +695,37 @@ bool SynthConjecture::doCheck()
     {
       failedBuiltin.push_back(datatypes::utils::sygusToBuiltin(cv, true));
     }
-    Trace("smt-debug-FINAL") << failedBuiltin << "\n";
+    Trace("failed-debug") << failedBuiltin << "\n";
     d_failedSolutions.push_back(failedBuiltin);
-    if (d_parent != nullptr)
+    std::map<Node, Node> failedMap;
+    for (size_t i = 0, size = failedBuiltin.size(); i < size; ++i)
     {
-      d_parent->notifyFailedSolution(d_quant, failedBuiltin);
+      Node fvar = d_quant[0][i];
+      failedMap[fvar] = failedBuiltin[i];
+      
     }
+   
+    if (d_parentSolver != nullptr)
+    {
+      d_parentSolver->checkimpliedFailedSolution(d_quant[0][0], failedBuiltin[0]);
+      //d_parentSolver->d_impliedFailedSolutions.push_back(failedBuiltin[0]);
+      Trace("failed-debug") << "Noting failed solutions\n";
+      if (options().quantifiers.sygusGrammarForm
+          == options::SygusGrammarForm::DNF &&  options().quantifiers.sygusBounds
+          == options::SygusBounds::LB)
+      {
+            d_parentSolver->noteFailedSynthSolution(failedMap);
+      }
+      if (options().quantifiers.sygusGrammarForm
+          == options::SygusGrammarForm::CNF &&  options().quantifiers.sygusBounds
+          == options::SygusBounds::UB)
+      {
+            d_parentSolver->noteFailedSynthSolution(failedMap);
+      }
+    } else {
+       Trace("failed-debug") << "d_parentSolver is null\n";
+    }
+
     Trace("smt-debug-FINAL") << skModel << "\n";
     return processCounterexample(skModel);
     
@@ -755,6 +784,14 @@ bool SynthConjecture::doCheck()
   d_qim.setModelUnsound(IncompleteId::QUANTIFIERS_SYGUS_SOLVED);
   return true;
 }
+
+
+void SynthConjecture::setSygusSolver(smt::SygusSolver* ss) { 
+    Trace("failed-debug") << "SynthConjecture::setSygusSolver this=" << this
+                        << " ss=" << ss << "\n";
+    d_parentSolver = ss; 
+    d_bodyAssump = d_parentSolver->getBodyAssumption();
+  }
 
 bool SynthConjecture::checkSideCondition(const std::vector<Node>& cvals)
 {
@@ -864,6 +901,12 @@ bool SynthConjecture::getEnumeratedValues(std::vector<Node>& n,
   return ret;
 }
 
+
+Node SynthConjecture::getBodyAssumption() const
+{
+  return d_bodyAssump;
+}
+
 EnumValueManager* SynthConjecture::getEnumValueManagerFor(Node e)
 {
   std::map<Node, std::unique_ptr<EnumValueManager>>::iterator it =
@@ -879,6 +922,9 @@ EnumValueManager* SynthConjecture::getEnumValueManagerFor(Node e)
   d_enumManager[e].reset(new EnumValueManager(
       d_env, d_qstate, d_qim, d_treg, d_stats, e, hasExamples));
   EnumValueManager* eman = d_enumManager[e].get();
+  eman->setBodyAssumption(d_bodyAssump);
+  Trace("sygus-assump") << "Passed body assumption to EnumValueManager for "
+                        << e << " : " << d_bodyAssump << "\n";
   // set up the examples
   if (hasExamples)
   {

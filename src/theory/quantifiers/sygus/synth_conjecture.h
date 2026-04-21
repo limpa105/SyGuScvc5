@@ -62,7 +62,7 @@ class SynthConjecture : protected EnvObj
                   QuantifiersRegistry& qr,
                   TermRegistry& tr,
                   SygusStatistics& s,
-                  SynthEngine* parent);
+                  smt::SygusSolver* parent);
   ~SynthConjecture();
   /**
    * Presolve, called once at the beginning of every check-sat.
@@ -76,7 +76,14 @@ class SynthConjecture : protected EnvObj
   /** whether the conjecture is waiting for a call to doCheck below */
   bool needsCheck();
 
-  SynthEngine* d_parent;
+  Node d_bodyAssump;
+
+  Node getBodyAssumption() const;
+
+
+  smt::SygusSolver* d_parentSolver;
+
+  void setSygusSolver(smt::SygusSolver* ss);
   /** do syntax-guided enumerative check
    *
    * This is step 2(a) of Figure 3 of Reynolds et al CAV 2015.

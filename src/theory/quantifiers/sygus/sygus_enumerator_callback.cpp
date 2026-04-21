@@ -169,79 +169,116 @@ bool SygusEnumeratorCallback::addTerm(const Node& n,
   // callback-specific add term (examples, etc.)
   
 
-  for (const Node& prev : aterms)
-{
-  if (prev.getType() != bn.getType())
-  {
-    continue;
-  }
-  NodeManager* nm = nodeManager();
+//   for (const Node& prev : aterms)
+// {
+//   if (prev.getType() != bn.getType())
+//   {
+//     continue;
+//   }
+//   NodeManager* nm = nodeManager();
 
   // Build (not (= bn prev))
-  Node eq = nm->mkNode(Kind::EQUAL, cval, prev);
-  Node query = eq.notNode();
-
-  // ------------------------------------------------------------
-  // Collect free variables manually
-  // ------------------------------------------------------------
-
-  std::vector<Node> vars;
-  std::unordered_set<Node> seen;
-  std::vector<Node> stack;
-
-  stack.push_back(cval);
-  stack.push_back(prev);
-
-  while (!stack.empty())
+    for (const Node& prev : aterms)
   {
-    Node cur = stack.back();
-    stack.pop_back();
-
-    if (cur.isVar())
+    if (prev.getType() != cval.getType())
     {
-      if (seen.insert(cur).second)
-      {
-        vars.push_back(cur);
-      }
       continue;
     }
 
-    for (const Node& c : cur)
+    NodeManager* nm = nodeManager();
+
+    // ------------------------------------------------------------
+    // Normalize both terms into the same bound-variable space.
+    // ------------------------------------------------------------
+    std::vector<Node> origVars;
+    std::unordered_set<Node> seen;
+    std::vector<Node> stack;
+    stack.push_back(cval);
+    stack.push_back(prev);
+    if (!d_bodyAssump.isNull())
     {
-      stack.push_back(c);
+      stack.push_back(d_bodyAssump);
+    }
+
+    while (!stack.empty())
+    {
+      Node cur = stack.back();
+      stack.pop_back();
+
+      if (cur.isVar())
+      {
+        if (seen.insert(cur).second)
+        {
+          origVars.push_back(cur);
+        }
+        continue;
+      }
+      for (const Node& c : cur)
+      {
+        stack.push_back(c);
+      }
+    }
+
+    std::vector<Node> bvars;
+    for (const Node& v : origVars)
+    {
+      bvars.push_back(nm->mkBoundVar(v.getType()));
+    }
+
+    Node cvalNorm = cval;
+    Node prevNorm = prev;
+    Node assumpNorm = d_bodyAssump;
+
+    if (!origVars.empty())
+    {
+      cvalNorm = cval.substitute(origVars.begin(), origVars.end(), bvars.begin(), bvars.end());
+      prevNorm = prev.substitute(origVars.begin(), origVars.end(), bvars.begin(), bvars.end());
+      if (!assumpNorm.isNull())
+      {
+        assumpNorm =
+            assumpNorm.substitute(origVars.begin(), origVars.end(), bvars.begin(), bvars.end());
+      }
+    }
+
+    // ------------------------------------------------------------
+    // Build "assumption ∧ (cval != prev)"
+    // ------------------------------------------------------------
+    Node eq = nm->mkNode(Kind::EQUAL, cvalNorm, prevNorm);
+    Node diff = eq.notNode();
+
+    Node full = diff;
+    if (!assumpNorm.isNull())
+    {
+      full = nm->mkNode(Kind::AND, assumpNorm, diff);
+    }
+
+    Node closedQuery = full;
+    if (!bvars.empty())
+    {
+      Node bvl = nm->mkNode(Kind::BOUND_VAR_LIST, bvars);
+      closedQuery = nm->mkNode(Kind::EXISTS, bvl, full);
+    }
+
+    // ------------------------------------------------------------
+    // SMT check
+    // ------------------------------------------------------------
+    std::unique_ptr<SolverEngine> subsolver =
+        std::make_unique<SolverEngine>(nodeManager(), &options());
+
+    subsolver->setLogic(d_env.getLogicInfo());
+    subsolver->assertFormula(closedQuery);
+
+    Result r = subsolver->checkSat();
+
+    if (r.getStatus() == Result::UNSAT)
+    {
+      Trace("sygus-enum-exc-call")
+          << "Exclude (by SMT equivalence under assumption): "
+          << bnRaw << " == " << prev << std::endl;
+      bterms.insert(cval);
+      return false;
     }
   }
-
-  Node closedQuery = query;
-
-  if (!vars.empty())
-  {
-    Node bvl = nm->mkNode(Kind::BOUND_VAR_LIST, vars);
-    closedQuery = nm->mkNode(Kind::EXISTS, bvl, query);
-  }
-
-  // ------------------------------------------------------------
-  // Create subsolver
-  // ------------------------------------------------------------
-
-  std::unique_ptr<SolverEngine> subsolver =
-      std::make_unique<SolverEngine>(nodeManager(), &options());
-
-  subsolver->setLogic(d_env.getLogicInfo());
-
-  subsolver->assertFormula(closedQuery);
-
-  Result r = subsolver->checkSat();
-
-  if (r.getStatus() == Result::UNSAT)
-  {
-    Trace("sygus-enum-exc-call")
-        << "Exclude (by SMT equivalence): "
-        << bnRaw << " == " << prev << std::endl;
-    bterms.insert(cval);
-    return false;
-  }
-}
 
 bterms.insert(cval);
 

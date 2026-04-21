@@ -1181,6 +1181,44 @@ name   = "Quantifiers"
   help       = "the branching factor for the number of interpreted constants to consider for each size when using --sygus-enum=fast"
 
 [[option]]
+  name       = "sygusGrammarForm"
+  category   = "expert"
+  long       = "sygus-grammar-form=MODE"
+  type       = "SygusGrammarForm"
+  default    = "NONE"
+  help       = "normal form for user-provided or blocking SyGuS grammars"
+  help_mode  = "Modes for SyGuS grammar form."
+[[option.mode.NONE]]
+  name = "none"
+  help = "Do not assume the grammar is in a particular normal form."
+[[option.mode.CNF]]
+  name = "cnf"
+  help = "Treat the grammar as conjunctive normal form."
+[[option.mode.DNF]]
+  name = "dnf"
+  help = "Treat the grammar as disjunctive normal form."
+
+[[option]]
+  name       = "sygusBounds"
+  category   = "expert"
+  long       = "sygus-bound=MODE"
+  type       = "SygusBounds"
+  default    = "NONE"
+  help       = "normal form for user-provided or blocking SyGuS grammars"
+  help_mode  = "Modes for SyGuS grammar form."
+[[option.mode.NONE]]
+  name = "none"
+  help = "Do not assume the grammar is in a particular normal form."
+[[option.mode.LB]]
+  name = "lb"
+  help = "we are searching for a lower bound"
+[[option.mode.UB]]
+  name = "ub"
+  help = "we are searching for an upper bound"
+
+
+
+[[option]]
   name       = "sygusMinGrammar"
   category   = "regular"
   long       = "sygus-min-grammar"

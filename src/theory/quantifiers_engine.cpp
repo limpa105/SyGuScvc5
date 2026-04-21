@@ -109,6 +109,26 @@ QuantifiersEngine::QuantifiersEngine(Env& env,
 
 QuantifiersEngine::~QuantifiersEngine() {}
 
+
+void QuantifiersEngine::setSygusSolver(smt::SygusSolver* ss)
+{
+  d_sygusSolver = ss;
+
+  if (!d_qmodules)
+  {
+    Trace("failed-debug") << "ENGINE NOT SET: d_qmodules is null\n";
+    return;
+  }
+  if (!d_qmodules->d_synth_e.get())
+  {
+    Trace("failed-debug") << "ENGINE NOT SET: d_synth_e is null\n";
+    return;
+  }
+
+  Trace("failed-debug") << "Forwarding solver to synth engine\n";
+  d_qmodules->d_synth_e->setSygusSolver(ss);
+}
+
 void QuantifiersEngine::finishInit(TheoryEngine* te)
 {
   // connect the quantifiers model to the underlying theory model
@@ -128,6 +148,24 @@ void QuantifiersEngine::finishInit(TheoryEngine* te)
   // quantifiers bound inference needs to be informed of the bounded integers
   // module, which has information about which quantifiers have finite bounds
   d_qreg.getQuantifiersBoundInference().finishInit(d_qmodules->d_bint.get());
+  // if (d_sygusSolver == nullptr)
+  // {
+  //   Trace("failed-debug") << "finishInit: d_sygusSolver is null\n";
+  //   return;
+  // }
+  // if (!d_qmodules)
+  // {
+  //   Trace("failed-debug") << "finishInit: d_qmodules is null\n";
+  //   return;
+  // }
+  // if (!d_qmodules->d_synth_e.get())
+  // {
+  //   Trace("failed-debug") << "finishInit: d_synth_e is null\n";
+  //   return;
+  // }
+
+  // Trace("failed-debug") << "finishInit: forwarding stored solver\n";
+  // d_qmodules->d_synth_e->setSygusSolver(d_sygusSolver);
 }
 
 QuantifiersRegistry& QuantifiersEngine::getQuantifiersRegistry()
@@ -704,6 +742,9 @@ bool QuantifiersEngine::getSynthSolutions(
 {
   return d_qmodules->d_synth_e->getSynthSolutions(sol_map);
 }
+
+
+
 
 void QuantifiersEngine::updateBlockingTypeForSynthFun(Node sf,
                                                       TypeNode bt,

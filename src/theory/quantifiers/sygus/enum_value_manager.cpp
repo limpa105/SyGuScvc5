@@ -118,6 +118,14 @@ Node EnumValueManager::getEnumeratedValue(bool& activeIncomplete)
             false,
             options().quantifiers.sygusRepairConst,
             options().quantifiers.sygusEnumFastNumConsts);
+      if (d_bodyAssump != Node::null())
+      {
+        Trace("sygus-assump") << "Passing assumption to SygusEnumerator: "
+                              << d_bodyAssump << "\n";
+        static_cast<SygusEnumerator*>(d_evg.get())
+            ->setBodyAssumption(d_bodyAssump);
+      }
+            
       }
     }
     Trace("sygus-active-gen")
